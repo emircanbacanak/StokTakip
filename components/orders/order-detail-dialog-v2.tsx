@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { X, Package, Truck, CreditCard, Plus, AlertCircle, ChevronDown, ChevronUp, Pencil, Trash2 } from "lucide-react";
+import { X, Package, Truck, CreditCard, Plus, AlertCircle, ChevronDown, ChevronUp, Pencil, Trash2, FileText } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getColorStyle } from "@/lib/color-map";
@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { NewDeliveryDialog } from "./new-delivery-dialog";
 import { NewPaymentDialog } from "./new-payment-dialog";
 import { EditOrderDialog } from "./edit-order-dialog";
+import { InvoiceDialog } from "./invoice-dialog";
 import { ColorBadge } from "@/components/ui/color-badge";
 
 function ProductThumb({ name }: { name: string }) {
@@ -317,6 +318,7 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
   const [showNewDelivery, setShowNewDelivery] = useState(false);
   const [showNewPayment, setShowNewPayment] = useState(false);
   const [showEditOrder, setShowEditOrder] = useState(false);
+  const [showInvoice, setShowInvoice] = useState(false);
   const [activeTab, setActiveTab] = useState<"items" | "deliveries" | "payments">("items");
   const [tablesNotFound, setTablesNotFound] = useState(false);
   const [deletingDeliveryId, setDeletingDeliveryId] = useState<string | null>(null);
@@ -444,6 +446,10 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
                 <p className="text-xs text-muted-foreground mt-0.5">{formatDate(order.created_at)}</p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
+                <button onClick={() => setShowInvoice(true)}
+                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-500/10 px-2.5 py-1.5 rounded-lg transition-all border border-blue-500/20">
+                  <FileText className="w-3 h-3" /><span>Fiş</span>
+                </button>
                 <button onClick={() => setShowEditOrder(true)}
                   className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted px-2.5 py-1.5 rounded-lg transition-all border border-border">
                   <Pencil className="w-3 h-3" /><span>Düzenle</span>
@@ -693,6 +699,9 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
       {showEditOrder && (
         <EditOrderDialog order={order} onClose={() => setShowEditOrder(false)}
           onSuccess={() => { setShowEditOrder(false); loadDetails(); onStatusChange(); }} />
+      )}
+      {showInvoice && (
+        <InvoiceDialog order={order} onClose={() => setShowInvoice(false)} />
       )}
       
       {/* Teslimat Silme Popup */}

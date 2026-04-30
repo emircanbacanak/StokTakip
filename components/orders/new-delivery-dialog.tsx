@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Truck, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/utils";
@@ -43,6 +43,33 @@ export function NewDeliveryDialog({
   const [loading, setLoading] = useState(false);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [showProduced, setShowProduced] = useState(false);
+
+  // Dialog her açıldığında state'i sıfırla
+  useEffect(() => {
+    // Order items'dan fresh data ile başla
+    const freshItems = order.items
+      .filter((item) => {
+        const producedQty = item.produced_quantity || 0;
+        const alreadyDelivered = item.delivered_quantity || 0;
+        return producedQty > alreadyDelivered; // Üretilmiş ama teslim edilmemiş varsa
+      })
+      .map((item) => {
+        const producedQty = item.produced_quantity || 0;
+        const alreadyDelivered = item.delivered_quantity || 0;
+        const availableToDeliver = producedQty - alreadyDelivered;
+        
+        return {
+          order_item_id: item.id,
+          quantity: 0,
+          max_quantity: availableToDeliver, // Üretilmiş kadar (fazla üretim dahil)
+        };
+      });
+    
+    setDeliveryItems(freshItems);
+    setNotes("");
+    setShowProduced(false);
+    setOpenGroups(new Set());
+  }, [order]); // order objesi değiştiğinde yeniden hesapla
 
   const updateQuantity = (itemId: string, quantity: number) => {
     setDeliveryItems((prev) =>
@@ -124,9 +151,14 @@ export function NewDeliveryDialog({
 
       toast({ title: "Teslimat kaydedildi ✓" });
       onSuccess();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Delivery error:", error);
-      toast({ title: "Hata oluştu", variant: "destructive" });
+      console.error("Error details:", JSON.stringify(error, null, 2));
+      toast({ 
+        title: "Hata oluştu", 
+        description: error?.message || "Teslimat kaydedilemedi",
+        variant: "destructive" 
+      });
     } finally {
       setLoading(false);
     }
@@ -156,11 +188,13 @@ export function NewDeliveryDialog({
     return sum + (overProduced * item.unit_price);
   }, 0);
 
-  // Ürünleri grupla
+  // Ürünleri grupla - üretilmiş ama teslim edilmemiş olanlar
   const groupedItems = new Map<string, OrderItem[]>();
   order.items.forEach((item) => {
-    const remaining = item.quantity - (item.delivered_quantity || 0);
-    if (remaining <= 0) return;
+    const producedQty = item.produced_quantity || 0;
+    const alreadyDelivered = item.delivered_quantity || 0;
+    const availableToDeliver = producedQty - alreadyDelivered;
+    if (availableToDeliver <= 0) return; // Teslim edilecek bir şey yoksa atla
     if (!groupedItems.has(item.product_name)) {
       groupedItems.set(item.product_name, []);
     }
@@ -268,9 +302,14 @@ export function NewDeliveryDialog({
               {showProduced && (
                 <div className="mt-3 bg-blue-500/5 rounded-xl p-4 border border-blue-500/20 space-y-3">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider">
-                      Üretilmiş Ürünler
-                    </p>
+                    <div>
+                      <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider">
+                        Üretilmiş Ürünler
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Toplam {totalProducedAvailable} adet hazır (Daha önce teslim edilenler hariç)
+                      </p>
+                    </div>
                     <button
                       type="button"
                       onClick={fillProducedQuantities}
@@ -330,7 +369,11 @@ export function NewDeliveryDialog({
               <div className="space-y-2">
                 {Array.from(groupedItems.entries()).map(([productName, items]) => {
                   const isOpen = openGroups.has(productName);
-                  const totalRemaining = items.reduce((sum, i) => sum + (i.quantity - (i.delivered_quantity || 0)), 0);
+                  const totalRemaining = items.reduce((sum, i) => {
+                    const producedQty = i.produced_quantity || 0;
+                    const alreadyDelivered = i.delivered_quantity || 0;
+                    return sum + (producedQty - alreadyDelivered);
+                  }, 0);
                   const unitPrice = items[0]?.unit_price || 0;
 
                   return (
@@ -365,7 +408,9 @@ export function NewDeliveryDialog({
                       {isOpen && (
                         <div className="border-t border-border bg-background/50 p-3 space-y-2">
                           {items.map((item) => {
-                            const remaining = item.quantity - (item.delivered_quantity || 0);
+                            const producedQty = item.produced_quantity || 0;
+                            const alreadyDelivered = item.delivered_quantity || 0;
+                            const remaining = producedQty - alreadyDelivered; // Üretilmiş - Teslim edilen
                             const deliveryItem = deliveryItems.find((di) => di.order_item_id === item.id);
                             const currentQty = deliveryItem?.quantity || 0;
 
