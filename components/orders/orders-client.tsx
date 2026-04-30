@@ -143,6 +143,21 @@ export function OrdersClient() {
     seen[o.buyer.id].orders.push(o);
   });
 
+  // Toplam borç hesaplamasında fazla üretimi dahil et
+  const calculateTotalDebt = (orders: Order[]) => {
+    return orders.reduce((sum, order) => {
+      // Fazla üretim değeri
+      const overProductionValue = order.items.reduce((itemSum, item) => {
+        const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
+        return itemSum + (overProduced * (item.unit_price || 0));
+      }, 0);
+      
+      // Gerçek toplam = sipariş tutarı + fazla üretim
+      const actualTotal = order.total_amount + overProductionValue;
+      return sum + (actualTotal - order.paid_amount);
+    }, 0);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -173,7 +188,7 @@ export function OrdersClient() {
       ) : (
         <div className="space-y-3">
           {groups.map((g) => {
-            const totalDebt = g.orders.reduce((s, o) => s + (o.total_amount - o.paid_amount), 0);
+            const totalDebt = calculateTotalDebt(g.orders);
 
             return (
               <button

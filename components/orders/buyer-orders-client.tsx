@@ -220,8 +220,27 @@ export function BuyerOrdersClient({ buyerId }: { buyerId: string }) {
     load();
   }
 
-  const totalDebt = orders.reduce((s, o) => s + (o.total_amount - o.paid_amount), 0);
-  const totalAmount = orders.reduce((s, o) => s + o.total_amount, 0);
+  const totalDebt = orders.reduce((s, o) => {
+    // Fazla üretim değeri
+    const overProductionValue = o.items.reduce((itemSum, item) => {
+      const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
+      return itemSum + (overProduced * (item.unit_price || 0));
+    }, 0);
+    
+    // Gerçek toplam = sipariş tutarı + fazla üretim
+    const actualTotal = o.total_amount + overProductionValue;
+    return s + (actualTotal - o.paid_amount);
+  }, 0);
+  
+  const totalAmount = orders.reduce((s, o) => {
+    // Fazla üretim değeri
+    const overProductionValue = o.items.reduce((itemSum, item) => {
+      const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
+      return itemSum + (overProduced * (item.unit_price || 0));
+    }, 0);
+    
+    return s + o.total_amount + overProductionValue;
+  }, 0);
 
   // Fazla üretim hesabı
   const overItems: OverItem[] = orders.flatMap((o) =>
@@ -311,34 +330,48 @@ export function BuyerOrdersClient({ buyerId }: { buyerId: string }) {
         </div>
       ) : (
         <div className="space-y-2">
-          {orders.map((o) => (
-            <div key={o.id} onClick={() => setSelected(o)}
-              className="bg-card rounded-2xl border border-border px-5 py-4 flex items-center gap-4 cursor-pointer hover:border-blue-500/30 hover:shadow-md hover:shadow-blue-500/5 active:scale-[0.99] transition-all group">
-              {o.items[0] && <ProductThumb name={o.items[0].product_name} />}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${STATUS_STYLES[o.status]}`}>
-                    {ORDER_STATUS_LABELS[o.status]}
-                  </span>
+          {orders.map((o) => {
+            // Fazla üretim değeri hesapla
+            const overProductionValue = o.items.reduce((sum, item) => {
+              const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
+              return sum + (overProduced * (item.unit_price || 0));
+            }, 0);
+            
+            const actualTotal = o.total_amount + overProductionValue;
+            const remainingDebt = actualTotal - o.paid_amount;
+            
+            return (
+              <div key={o.id} onClick={() => setSelected(o)}
+                className="bg-card rounded-2xl border border-border px-5 py-4 flex items-center gap-4 cursor-pointer hover:border-blue-500/30 hover:shadow-md hover:shadow-blue-500/5 active:scale-[0.99] transition-all group">
+                {o.items[0] && <ProductThumb name={o.items[0].product_name} />}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${STATUS_STYLES[o.status]}`}>
+                      {ORDER_STATUS_LABELS[o.status]}
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-1">{formatDate(o.created_at)} · {o.items.length} ürün</p>
+                  <div className="flex items-center gap-3">
+                    <span className="text-base font-bold text-foreground">{formatCurrency(actualTotal)}</span>
+                    {overProductionValue > 0 && (
+                      <span className="text-xs text-amber-600 font-medium">+{formatCurrency(overProductionValue)} fazla</span>
+                    )}
+                    {remainingDebt > 0 && (
+                      <span className="text-sm text-red-500 font-medium">Kalan: {formatCurrency(remainingDebt)}</span>
+                    )}
+                  </div>
                 </div>
-                <p className="text-sm text-muted-foreground mb-1">{formatDate(o.created_at)} · {o.items.length} ürün</p>
-                <div className="flex items-center gap-3">
-                  <span className="text-base font-bold text-foreground">{formatCurrency(o.total_amount)}</span>
-                  {o.total_amount - o.paid_amount > 0 && (
-                    <span className="text-sm text-red-500 font-medium">Kalan: {formatCurrency(o.total_amount - o.paid_amount)}</span>
-                  )}
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className={`w-2.5 h-2.5 rounded-full ${STATUS_DOT[o.status]}`} />
+                  <button onClick={(e) => del(o.id, e)}
+                    className="p-2 text-muted-foreground/40 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  <ChevronRight className="w-5 h-5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <div className={`w-2.5 h-2.5 rounded-full ${STATUS_DOT[o.status]}`} />
-                <button onClick={(e) => del(o.id, e)}
-                  className="p-2 text-muted-foreground/40 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-                <ChevronRight className="w-5 h-5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors" />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

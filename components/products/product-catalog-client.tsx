@@ -14,7 +14,11 @@ async function removeBackground(file: File): Promise<string> {
   // Dynamic import to avoid SSR issues
   const { removeBackground } = await import("@imgly/background-removal");
   const blob = await removeBackground(file, {
-    model: "isnet_quint8",
+    model: "isnet_fp16", // En kaliteli model (isnet_fp16 > isnet > isnet_quint8)
+    output: {
+      format: "image/png",
+      quality: 0.9,
+    },
   });
   // Convert to base64 so it can be used as img src without blob: restrictions
   return new Promise((resolve) => {
@@ -55,6 +59,9 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [imagePreview, setImagePreview] = useState<string | null>(initial?.image_url ?? null);
+  const [originalImage, setOriginalImage] = useState<string | null>(null);
+  const [removedBgImage, setRemovedBgImage] = useState<string | null>(null);
+  const [useOriginal, setUseOriginal] = useState(true);
   const [removingBg, setRemovingBg] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -63,17 +70,47 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    
+    // Orijinal resmi kaydet
+    const original = URL.createObjectURL(file);
+    setOriginalImage(original);
+    setImagePreview(original);
+    setUseOriginal(true);
+    setRemovedBgImage(null);
+  }
+
+  async function handleRemoveBackground() {
+    if (!originalImage) return;
     setRemovingBg(true);
     try {
+      // Orijinal dosyayı al
+      const res = await fetch(originalImage);
+      const blob = await res.blob();
+      const file = new File([blob], "image.jpg", { type: blob.type });
+      
       const result = await removeBackground(file);
+      setRemovedBgImage(result);
       setImagePreview(result);
+      setUseOriginal(false);
       toast({ title: "Arkaplan kaldırıldı ✓" });
     } catch {
-      // Fallback: just show original
-      setImagePreview(URL.createObjectURL(file));
-      toast({ title: "Arkaplan kaldırılamadı, orijinal resim kullanıldı", variant: "destructive" });
+      toast({ title: "Arkaplan kaldırılamadı", variant: "destructive" });
     } finally {
       setRemovingBg(false);
+    }
+  }
+
+  function switchToOriginal() {
+    if (originalImage) {
+      setImagePreview(originalImage);
+      setUseOriginal(true);
+    }
+  }
+
+  function switchToRemoved() {
+    if (removedBgImage) {
+      setImagePreview(removedBgImage);
+      setUseOriginal(false);
     }
   }
 
@@ -118,7 +155,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       {/* Image upload */}
       <div>
         <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
-          Ürün Resmi (arkaplan otomatik kaldırılır)
+          Ürün Resmi
         </label>
         <div
           onClick={() => !removingBg && fileRef.current?.click()}
@@ -133,7 +170,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
             <>
               <img src={imagePreview} alt="preview" className="relative max-h-36 max-w-full object-contain" />
               <button
-                onClick={(e) => { e.stopPropagation(); setImagePreview(null); }}
+                onClick={(e) => { e.stopPropagation(); setImagePreview(null); setOriginalImage(null); setRemovedBgImage(null); }}
                 className="absolute top-2 right-2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white hover:bg-red-600 transition-colors"
               >
                 <X className="w-3 h-3" />
@@ -143,11 +180,52 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
             <div className="flex flex-col items-center gap-2 text-muted-foreground">
               <ImageIcon className="w-8 h-8 opacity-40" />
               <span className="text-xs font-medium">Resim seç veya sürükle</span>
-              <span className="text-[10px] opacity-60">AI ile arkaplan otomatik kaldırılır</span>
+              <span className="text-[10px] opacity-60">Yükledikten sonra arkaplan kaldırabilirsiniz</span>
             </div>
           )}
         </div>
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+        
+        {/* Arkaplan Kaldırma Seçenekleri */}
+        {originalImage && (
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={switchToOriginal}
+              disabled={removingBg}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
+                useOriginal
+                  ? "bg-blue-500 text-white shadow-md"
+                  : "bg-muted text-muted-foreground hover:bg-muted/70"
+              }`}
+            >
+              Orijinal Kullan
+            </button>
+            {removedBgImage ? (
+              <button
+                type="button"
+                onClick={switchToRemoved}
+                disabled={removingBg}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
+                  !useOriginal
+                    ? "bg-violet-500 text-white shadow-md"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                Arkaplan Kaldırılmış
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleRemoveBackground}
+                disabled={removingBg}
+                className="flex-1 py-2 px-3 rounded-lg text-xs font-semibold bg-gradient-to-r from-violet-500 to-purple-600 text-white hover:shadow-md transition-all disabled:opacity-50"
+              >
+                {removingBg ? "Kaldırılıyor..." : "Arkaplan Kaldır"}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div>
@@ -177,6 +255,7 @@ export function ProductCatalogClient() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
+  const [filter, setFilter] = useState<"all" | "no-image">("all");
   const { toast } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const topRef = useRef<HTMLDivElement>(null);
@@ -222,10 +301,43 @@ export function ProductCatalogClient() {
     load();
   }
 
+  // Filtreleme
+  const filteredProducts = filter === "no-image" 
+    ? products.filter(p => !p.image_url)
+    : products;
+  
+  const noImageCount = products.filter(p => !p.image_url).length;
+
   return (
     <div className="space-y-4">
       <div ref={topRef} className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{products.length} ürün</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-muted-foreground">{filteredProducts.length} ürün</p>
+          {noImageCount > 0 && (
+            <div className="flex gap-1">
+              <button
+                onClick={() => setFilter("all")}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  filter === "all"
+                    ? "bg-blue-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                Tümü
+              </button>
+              <button
+                onClick={() => setFilter("no-image")}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  filter === "no-image"
+                    ? "bg-amber-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                Resim Bekleyen ({noImageCount})
+              </button>
+            </div>
+          )}
+        </div>
         {!showForm && !editing && (
           <button
             onClick={startAdd}
@@ -255,20 +367,30 @@ export function ProductCatalogClient() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {[...Array(6)].map((_, i) => <div key={i} className="h-40 bg-card rounded-2xl animate-pulse border border-border" />)}
         </div>
-      ) : products.length === 0 ? (
+      ) : filteredProducts.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card p-16 text-center">
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/10 to-violet-500/10 flex items-center justify-center mx-auto mb-4">
             <Package className="w-7 h-7 text-blue-500" />
           </div>
-          <p className="font-semibold text-foreground mb-1">Henüz ürün yok</p>
-          <p className="text-sm text-muted-foreground mb-5">Ürün kataloğunuzu oluşturun</p>
-          <button onClick={() => setShowForm(true)} className="bg-gradient-to-r from-blue-500 to-violet-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-blue-500/25">
-            İlk Ürünü Ekle
-          </button>
+          <p className="font-semibold text-foreground mb-1">
+            {filter === "no-image" ? "Tüm ürünlerin resmi var" : "Henüz ürün yok"}
+          </p>
+          <p className="text-sm text-muted-foreground mb-5">
+            {filter === "no-image" ? "Harika! Tüm ürünlerinizin fotoğrafı mevcut" : "Ürün kataloğunuzu oluşturun"}
+          </p>
+          {filter === "no-image" ? (
+            <button onClick={() => setFilter("all")} className="bg-gradient-to-r from-blue-500 to-violet-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-blue-500/25">
+              Tüm Ürünleri Göster
+            </button>
+          ) : (
+            <button onClick={() => setShowForm(true)} className="bg-gradient-to-r from-blue-500 to-violet-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-blue-500/25">
+              İlk Ürünü Ekle
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {products.map((p) => (
+          {filteredProducts.map((p) => (
             <div key={p.id} className="bg-card rounded-2xl border border-border overflow-hidden hover:border-blue-500/30 hover:shadow-md hover:shadow-blue-500/5 transition-all group">
               {/* Image area */}
               <div className="relative h-32 bg-muted flex items-center justify-center overflow-hidden">

@@ -12,6 +12,13 @@ interface Order {
   total_amount: number;
   paid_amount: number;
   buyer: { name: string };
+  items: Array<{
+    id: string;
+    quantity: number;
+    delivered_quantity: number;
+    produced_quantity: number;
+    unit_price: number;
+  }>;
 }
 
 export function NewPaymentDialog({
@@ -33,6 +40,34 @@ export function NewPaymentDialog({
   const amountNum = parseFloat(amount) || 0;
   const willOverpay = amountNum > remainingDebt && remainingDebt > 0;
   const overpayAmount = amountNum - remainingDebt;
+
+  // Teslim edilen ürünlerin toplam değeri (fazla üretim dahil)
+  const deliveredValue = order.items.reduce((sum, item) => {
+    const deliveredQty = item.delivered_quantity || 0;
+    const baseValue = deliveredQty * item.unit_price;
+    
+    // Fazla üretim değeri
+    const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
+    const overValue = overProduced * item.unit_price;
+    
+    return sum + baseValue + overValue;
+  }, 0);
+
+  // Teslim edilen ürünler için alınması gereken ödeme
+  const expectedPaymentForDelivered = deliveredValue;
+  
+  // Teslimatlardan kalan borç = Teslim edilen değer - Alınan ödeme
+  const deliveryDebt = Math.max(0, expectedPaymentForDelivered - order.paid_amount);
+  
+  // Fazla üretim toplam değeri
+  const totalOverProductionValue = order.items.reduce((sum, item) => {
+    const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
+    return sum + (overProduced * item.unit_price);
+  }, 0);
+  
+  // Gerçek toplam tutar (sipariş + fazla üretim)
+  const actualTotalAmount = order.total_amount + totalOverProductionValue;
+  const actualRemainingDebt = Math.max(0, actualTotalAmount - order.paid_amount);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,45 +130,107 @@ export function NewPaymentDialog({
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
           {/* Content */}
           <div className="overflow-y-auto flex-1 p-5 space-y-4">
-            {/* Özet */}
-            <div className="bg-muted/50 rounded-xl p-4 border border-border space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Toplam Tutar</span>
-                <span className="font-semibold text-foreground">{formatCurrency(order.total_amount)}</span>
+            {/* Teslim Edilen Ürünler Özeti */}
+            {deliveredValue > 0 && (
+              <div className="bg-blue-500/5 rounded-xl p-4 border border-blue-500/20 space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertCircle className="w-4 h-4 text-blue-600" />
+                  <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider">
+                    Teslim Edilen Ürünler
+                  </p>
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Teslim Edilen Değer</span>
+                    <span className="text-lg font-bold text-blue-600">{formatCurrency(deliveredValue)}</span>
+                  </div>
+                  
+                  {totalOverProductionValue > 0 && (
+                    <div className="flex justify-between items-center text-xs pl-3">
+                      <span className="text-muted-foreground">• Fazla Üretim Dahil</span>
+                      <span className="font-semibold text-amber-600">{formatCurrency(totalOverProductionValue)}</span>
+                    </div>
+                  )}
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Alınan Ödeme</span>
+                    <span className="text-base font-bold text-red-500">-{formatCurrency(order.paid_amount)}</span>
+                  </div>
+                  
+                  <div className="h-px bg-blue-500/20 my-2" />
+                  
+                  {deliveryDebt > 0 ? (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-bold text-foreground">Teslimatlardan Kalan</span>
+                      <span className="text-lg font-bold text-emerald-600">{formatCurrency(deliveryDebt)}</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-bold text-foreground">Teslimatlar</span>
+                      <span className="text-lg font-bold text-emerald-600">✓ Ödendi</span>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Ödenen</span>
-                <span className="font-semibold text-emerald-600">{formatCurrency(order.paid_amount)}</span>
-              </div>
-              <div className="flex justify-between text-sm pt-2 border-t border-border">
-                <span className="font-bold text-foreground">
-                  {order.paid_amount > order.total_amount ? "Fazla Ödeme" : "Kalan Borç"}
-                </span>
-                <span className={`font-bold ${
-                  order.paid_amount > order.total_amount 
-                    ? "text-amber-600" 
-                    : remainingDebt > 0 
+            )}
+
+            {/* Genel Özet */}
+            <div className="bg-muted/50 rounded-xl p-4 border border-border space-y-3">
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Sipariş Tutarı</span>
+                  <span className="text-base font-semibold text-foreground">{formatCurrency(order.total_amount)}</span>
+                </div>
+                
+                {totalOverProductionValue > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Fazla Üretim</span>
+                    <span className="text-base font-semibold text-amber-600">+{formatCurrency(totalOverProductionValue)}</span>
+                  </div>
+                )}
+                
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-bold text-foreground">Toplam Tutar</span>
+                  <span className="text-lg font-bold text-foreground">{formatCurrency(actualTotalAmount)}</span>
+                </div>
+                
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Ödenen</span>
+                  <span className="text-base font-bold text-red-500">-{formatCurrency(order.paid_amount)}</span>
+                </div>
+                
+                <div className="h-px bg-border my-2" />
+                
+                <div className="flex justify-between items-center">
+                  <span className="text-base font-bold text-foreground">
+                    {order.paid_amount > actualTotalAmount ? "Fazla Ödeme" : "Kalan Borç"}
+                  </span>
+                  <span className={`text-xl font-bold ${
+                    order.paid_amount > actualTotalAmount 
                       ? "text-red-500" 
-                      : "text-emerald-600"
-                }`}>
-                  {order.paid_amount > order.total_amount 
-                    ? `+${formatCurrency(order.paid_amount - order.total_amount)}`
-                    : formatCurrency(remainingDebt)
-                  }
-                </span>
+                      : actualRemainingDebt > 0 
+                        ? "text-emerald-600" 
+                        : "text-emerald-600"
+                  }`}>
+                    {order.paid_amount > actualTotalAmount 
+                      ? `-${formatCurrency(order.paid_amount - actualTotalAmount)}`
+                      : formatCurrency(actualRemainingDebt)
+                    }
+                  </span>
+                </div>
               </div>
             </div>
 
             {/* Fazla Ödeme Uyarısı */}
-            {order.paid_amount > order.total_amount && (
+            {order.paid_amount > actualTotalAmount && (
               <div className="bg-amber-500/10 rounded-xl p-3 border border-amber-500/30">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
                   <div>
                     <p className="text-xs font-semibold text-amber-600">Zaten Fazla Ödeme Var</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Bu sipariş için {formatCurrency(order.paid_amount - order.total_amount)} fazla ödeme alınmış.
-                      {order.total_amount === 0 && " Sipariş tutarı 0 TL."}
+                      Bu sipariş için {formatCurrency(order.paid_amount - actualTotalAmount)} fazla ödeme alınmış.
                     </p>
                   </div>
                 </div>
@@ -163,32 +260,32 @@ export function NewPaymentDialog({
               <div className="flex gap-2 mt-2">
                 <button
                   type="button"
-                  onClick={() => setAmount(Math.max(0, remainingDebt).toFixed(2))}
-                  disabled={remainingDebt <= 0}
+                  onClick={() => setAmount(Math.max(0, deliveryDebt).toFixed(2))}
+                  disabled={deliveryDebt <= 0}
                   className="flex-1 px-3 py-2 rounded-lg border border-border bg-background hover:bg-muted transition-colors text-xs font-semibold text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Kalan Tümü
+                  Teslimat Borcu
                 </button>
                 <button
                   type="button"
-                  onClick={() => setAmount(Math.max(0, remainingDebt / 2).toFixed(2))}
-                  disabled={remainingDebt <= 0}
+                  onClick={() => setAmount(Math.max(0, actualRemainingDebt).toFixed(2))}
+                  disabled={actualRemainingDebt <= 0}
                   className="flex-1 px-3 py-2 rounded-lg border border-border bg-background hover:bg-muted transition-colors text-xs font-semibold text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Yarısı
+                  Kalan Tümü
                 </button>
               </div>
             </div>
 
             {/* Overpayment Warning */}
-            {willOverpay && (
+            {willOverpay && actualRemainingDebt > 0 && (
               <div className="bg-amber-500/10 rounded-xl p-3 border border-amber-500/30">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
                   <div>
                     <p className="text-xs font-semibold text-amber-600">Fazla Ödeme Uyarısı</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Kalan borçtan {formatCurrency(overpayAmount)} fazla ödeme alınacak.
+                      Kalan borçtan {formatCurrency(amountNum - actualRemainingDebt)} fazla ödeme alınacak.
                     </p>
                   </div>
                 </div>

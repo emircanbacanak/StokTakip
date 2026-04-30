@@ -14,13 +14,31 @@ export function DashboardStats() {
   useEffect(() => {
     async function load() {
       let sb; try { sb = createClient(); } catch { setLoading(false); return; }
-      const { data } = await sb.from("orders").select("status, total_amount, paid_amount");
-      if (data) setStats({
-        totalOrders: data.length,
-        inProduction: data.filter((o) => o.status === "in_production").length,
-        completed: data.filter((o) => o.status === "completed" || o.status === "delivered").length,
-        totalDebt: data.reduce((s, o) => s + (o.total_amount - o.paid_amount), 0),
-      });
+      const { data: ordersData } = await sb
+        .from("orders")
+        .select("status, total_amount, paid_amount, items:order_items(quantity, produced_quantity, unit_price)");
+      
+      if (ordersData) {
+        // Fazla üretim dahil toplam borç hesapla
+        const totalDebt = ordersData.reduce((sum, order) => {
+          // Fazla üretim değeri
+          const overProductionValue = (order.items || []).reduce((itemSum: number, item: any) => {
+            const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
+            return itemSum + (overProduced * (item.unit_price || 0));
+          }, 0);
+          
+          // Gerçek toplam = sipariş tutarı + fazla üretim
+          const actualTotal = order.total_amount + overProductionValue;
+          return sum + (actualTotal - order.paid_amount);
+        }, 0);
+        
+        setStats({
+          totalOrders: ordersData.length,
+          inProduction: ordersData.filter((o) => o.status === "in_production").length,
+          completed: ordersData.filter((o) => o.status === "completed" || o.status === "delivered").length,
+          totalDebt,
+        });
+      }
       setLoading(false);
     }
     load();
