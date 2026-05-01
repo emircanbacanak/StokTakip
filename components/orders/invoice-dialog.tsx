@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { ColorBadge } from "@/components/ui/color-badge";
 import { useToast } from "@/hooks/use-toast";
+import QRCode from "qrcode";
 
 interface OrderItem {
   id: string;
@@ -39,6 +40,7 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
     unit_price: number;
     total: number;
   }>>([]);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
 
   useEffect(() => {
     if (mode === "all") {
@@ -74,6 +76,27 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
     }
   }, [mode, order.items]);
 
+  // QR kod oluştur
+  useEffect(() => {
+    if (mode && invoiceItems.length > 0) {
+      // İrsaliye URL'i oluştur (production'da gerçek domain kullanılacak)
+      const invoiceUrl = `${window.location.origin}/invoice/${order.id}?mode=${mode}`;
+      
+      QRCode.toDataURL(invoiceUrl, {
+        width: 200,
+        margin: 1,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      }).then(url => {
+        setQrCodeDataUrl(url);
+      }).catch(err => {
+        console.error('QR kod oluşturma hatası:', err);
+      });
+    }
+  }, [mode, invoiceItems, order.id]);
+
   const totalAmount = invoiceItems.reduce((sum, item) => sum + item.total, 0);
   const totalQuantity = invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -86,8 +109,262 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
     return acc;
   }, {} as Record<string, typeof invoiceItems>);
 
+  // HTML içeriğini oluştur
+  function generateInvoiceHTML() {
+    const productRows = Object.entries(groupedItems).map(([productName, items]) => {
+      const productTotal = items.reduce((s, i) => s + i.total, 0);
+      const productQty = items.reduce((s, i) => s + i.quantity, 0);
+      
+      const colorRows = items.map(item => `
+        <tr>
+          <td style="padding: 6px 8px; border: 1px solid #d1d5db;">${item.color}</td>
+          <td style="padding: 6px 8px; border: 1px solid #d1d5db; text-align: center; font-weight: 600;">${item.quantity}</td>
+          <td style="padding: 6px 8px; border: 1px solid #d1d5db; text-align: right;">${formatCurrency(item.unit_price)}</td>
+          <td style="padding: 6px 8px; border: 1px solid #d1d5db; text-align: right; font-weight: 600;">${formatCurrency(item.total)}</td>
+        </tr>
+      `).join('');
+      
+      return `
+        <div style="margin-bottom: 12px; border: 1px solid #9ca3af; overflow: hidden;">
+          <div style="background-color: #f3f4f6; padding: 12px 16px; border-bottom: 1px solid #9ca3af;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <h3 style="font-weight: bold; font-size: 11pt; margin: 0;">${productName}</h3>
+              <div style="text-align: right;">
+                <p style="font-size: 9pt; color: #4b5563; margin: 0 0 4px 0;">${productQty} adet</p>
+                <p style="font-weight: bold; font-size: 10pt; margin: 0;">${formatCurrency(productTotal)}</p>
+              </div>
+            </div>
+          </div>
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead style="background-color: #f9fafb;">
+              <tr>
+                <th style="padding: 6px 8px; border: 1px solid #d1d5db; text-align: left; font-weight: 600; font-size: 8pt;">Renk</th>
+                <th style="padding: 6px 8px; border: 1px solid #d1d5db; text-align: center; font-weight: 600; font-size: 8pt;">Adet</th>
+                <th style="padding: 6px 8px; border: 1px solid #d1d5db; text-align: right; font-weight: 600; font-size: 8pt;">Birim Fiyat</th>
+                <th style="padding: 6px 8px; border: 1px solid #d1d5db; text-align: right; font-weight: 600; font-size: 8pt;">Toplam</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${colorRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }).join('');
+
+    return `
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>İrsaliye - ${order.buyer.name}</title>
+  <style>
+    @page {
+      margin: 1cm;
+      size: A4 portrait;
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #000;
+      background: #fff;
+      line-height: 1.4;
+    }
+    
+    .container {
+      max-width: 100%;
+      margin: 0 auto;
+    }
+    
+    h1 {
+      font-size: 18pt;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+    
+    h2 {
+      font-size: 11pt;
+      font-weight: bold;
+      margin-bottom: 8px;
+      margin-top: 12px;
+    }
+    
+    p {
+      font-size: 9pt;
+      margin-bottom: 4px;
+    }
+    
+    .header {
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #6b7280;
+    }
+    
+    .header-dates {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9pt;
+      margin-top: 8px;
+    }
+    
+    .customer-info {
+      margin-bottom: 12px;
+    }
+    
+    .customer-name {
+      font-size: 12pt;
+      font-weight: 600;
+    }
+    
+    .products {
+      margin-bottom: 12px;
+    }
+    
+    .summary {
+      border-top: 2px solid #6b7280;
+      padding-top: 12px;
+      margin-top: 16px;
+    }
+    
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    
+    .summary-label {
+      font-size: 10pt;
+      font-weight: bold;
+    }
+    
+    .summary-value {
+      font-size: 13pt;
+      font-weight: bold;
+    }
+    
+    .summary-value-large {
+      font-size: 15pt;
+      font-weight: bold;
+    }
+    
+    .footer {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid #9ca3af;
+      text-align: center;
+      font-size: 8pt;
+      color: #4b5563;
+    }
+    
+    @media print {
+      body {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      
+      table tr {
+        page-break-inside: avoid !important;
+      }
+      
+      .summary {
+        page-break-inside: avoid !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>İRSALİYE</h1>
+      <div class="header-dates">
+        <div>
+          <p style="font-weight: 600;">Tarih:</p>
+          <p>${formatDate(new Date().toISOString())}</p>
+        </div>
+        <div style="text-align: right;">
+          <p style="font-weight: 600;">Sipariş Tarihi:</p>
+          <p>${formatDate(order.created_at)}</p>
+        </div>
+      </div>
+    </div>
+    
+    <div class="customer-info">
+      <h2>MÜŞTERİ BİLGİLERİ</h2>
+      <p class="customer-name">${order.buyer.name}</p>
+    </div>
+    
+    <div class="products">
+      <h2>ÜRÜNLER</h2>
+      ${productRows}
+    </div>
+    
+    <div class="summary">
+      <div class="summary-row">
+        <span class="summary-label">Toplam Adet:</span>
+        <span class="summary-value">${totalQuantity} adet</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">Toplam Tutar:</span>
+        <span class="summary-value-large">${formatCurrency(totalAmount)}</span>
+      </div>
+    </div>
+    
+    <div class="footer">
+      <p>Bu belge elektronik ortamda oluşturulmuştur.</p>
+      ${qrCodeDataUrl ? `
+      <div style="margin-top: 16px;">
+        <img src="${qrCodeDataUrl}" alt="QR Kod" style="width: 120px; height: 120px; margin: 0 auto; display: block;" />
+        <p style="margin-top: 8px; font-size: 7pt;">İrsaliye detaylarını görmek için QR kodu taratın</p>
+      </div>
+      ` : ''}
+    </div>
+  </div>
+</body>
+</html>
+    `;
+  }
+
   function handlePrint() {
-    window.print();
+    const htmlContent = generateInvoiceHTML();
+    
+    // Gizli iframe oluştur
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'absolute';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    iframe.style.visibility = 'hidden';
+    
+    document.body.appendChild(iframe);
+    
+    // iframe'e içeriği yaz
+    const iframeDoc = iframe.contentWindow?.document;
+    if (iframeDoc) {
+      iframeDoc.open();
+      iframeDoc.write(htmlContent);
+      iframeDoc.close();
+      
+      // İçerik yüklendikten sonra yazdır
+      iframe.onload = () => {
+        setTimeout(() => {
+          iframe.contentWindow?.print();
+          
+          // Yazdırma tamamlandıktan sonra iframe'i kaldır
+          setTimeout(() => {
+            document.body.removeChild(iframe);
+          }, 1000);
+        }, 250);
+      };
+    }
+    
     toast({ title: "Fiş yazdırılıyor..." });
   }
 
@@ -263,6 +540,16 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
             {/* Footer */}
             <div className="mt-8 pt-4 border-t border-gray-300 text-center text-sm text-gray-600">
               <p>Bu belge elektronik ortamda oluşturulmuştur.</p>
+              {qrCodeDataUrl && (
+                <div className="mt-4">
+                  <img 
+                    src={qrCodeDataUrl} 
+                    alt="QR Kod" 
+                    className="w-32 h-32 mx-auto"
+                  />
+                  <p className="mt-2 text-xs text-gray-500">İrsaliye detaylarını görmek için QR kodu taratın</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -284,272 +571,6 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
           </button>
         </div>
       </div>
-
-      <style jsx global>{`
-        @media print {
-          @page {
-            margin: 0.3cm;
-            size: A4;
-          }
-          
-          /* Body ve HTML'i sıfırla */
-          html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            height: auto !important;
-            overflow: visible !important;
-          }
-          
-          /* Her şeyi gizle */
-          body * {
-            visibility: hidden !important;
-          }
-          
-          /* Sadece printable-invoice ve içeriğini göster */
-          #printable-invoice,
-          #printable-invoice * {
-            visibility: visible !important;
-          }
-          
-          /* Printable invoice'i normal flow'da tut - ABSOLUTE DEĞİL */
-          #printable-invoice {
-            position: static !important;
-            left: auto !important;
-            top: auto !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            background: white !important;
-            color: black !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            box-sizing: border-box !important;
-            page-break-after: auto !important;
-            orphans: 3 !important;
-            widows: 3 !important;
-          }
-          
-          /* Tüm elementleri beyaz arka plan, siyah yazı */
-          #printable-invoice * {
-            color: black !important;
-          }
-          
-          /* Summary section için özel kurallar */
-          #printable-invoice .summary-section {
-            background-color: white !important;
-            border-top: 2px solid #6b7280 !important;
-            padding-top: 12px !important;
-            margin-top: 16px !important;
-            page-break-inside: avoid !important;
-            page-break-before: auto !important;
-          }
-          
-          #printable-invoice .summary-section * {
-            background-color: white !important;
-            color: black !important;
-            font-weight: bold !important;
-          }
-          
-          /* Ürün gruplarının içindeki tabloların bölünmesine izin ver */
-          #printable-invoice .mb-4 {
-            page-break-inside: auto !important;
-          }
-          
-          /* Sadece tablo satırlarının bölünmesini engelle */
-          #printable-invoice tbody tr {
-            page-break-inside: avoid !important;
-            page-break-after: auto !important;
-          }
-          
-          /* Ürün başlıklarının yalnız kalmamasını sağla */
-          #printable-invoice .bg-gray-100 {
-            page-break-after: avoid !important;
-          }
-          
-          /* Font boyutları - KOMPAKT */
-          #printable-invoice h1 {
-            font-size: 20pt !important;
-            font-weight: bold !important;
-            margin-bottom: 4px !important;
-            margin-top: 0 !important;
-          }
-          
-          #printable-invoice h2 {
-            font-size: 12pt !important;
-            font-weight: bold !important;
-            margin-bottom: 4px !important;
-            margin-top: 8px !important;
-          }
-          
-          #printable-invoice h3 {
-            font-size: 11pt !important;
-            font-weight: bold !important;
-          }
-          
-          #printable-invoice p,
-          #printable-invoice td,
-          #printable-invoice th {
-            font-size: 9pt !important;
-            line-height: 1.2 !important;
-          }
-          
-          #printable-invoice .text-xs {
-            font-size: 7pt !important;
-          }
-          
-          #printable-invoice .text-sm {
-            font-size: 8pt !important;
-          }
-          
-          #printable-invoice .text-lg {
-            font-size: 10pt !important;
-          }
-          
-          #printable-invoice .text-xl {
-            font-size: 12pt !important;
-          }
-          
-          #printable-invoice .text-2xl {
-            font-size: 14pt !important;
-          }
-          
-          #printable-invoice .text-3xl {
-            font-size: 16pt !important;
-          }
-          
-          /* Gri arka planlar - ZORUNLU */
-          #printable-invoice .bg-gray-100 {
-            background-color: #f3f4f6 !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          
-          #printable-invoice .bg-gray-50 {
-            background-color: #f9fafb !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          
-          /* Border'lar - KALIN VE NET */
-          #printable-invoice .border,
-          #printable-invoice .border-gray-300,
-          #printable-invoice .border-gray-200 {
-            border-color: #9ca3af !important;
-            border-style: solid !important;
-            border-width: 1px !important;
-          }
-          
-          #printable-invoice .border-b-2 {
-            border-bottom-width: 3px !important;
-            border-bottom-color: #6b7280 !important;
-          }
-          
-          #printable-invoice .border-t-2 {
-            border-top-width: 3px !important;
-            border-top-color: #6b7280 !important;
-          }
-          
-          #printable-invoice .border-t {
-            border-top-width: 1px !important;
-          }
-          
-          #printable-invoice .border-b {
-            border-bottom-width: 1px !important;
-          }
-          
-          /* Text colors */
-          #printable-invoice .text-gray-600 {
-            color: #4b5563 !important;
-          }
-          
-          /* Tablolar - KOMPAKT */
-          #printable-invoice table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-            margin: 4px 0 !important;
-          }
-          
-          #printable-invoice th,
-          #printable-invoice td {
-            padding: 4px 6px !important;
-            text-align: left !important;
-            border: 1px solid #d1d5db !important;
-          }
-          
-          #printable-invoice th {
-            background-color: #f9fafb !important;
-            font-weight: bold !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          
-          /* Rounded corners'ı kaldır (yazdırmada sorun çıkarabilir) */
-          #printable-invoice .rounded-lg,
-          #printable-invoice .rounded-xl,
-          #printable-invoice .rounded-2xl {
-            border-radius: 0 !important;
-          }
-          
-          /* Margin ve padding'leri düzelt - ÇOK KOMPAKT */
-          #printable-invoice .mb-8 {
-            margin-bottom: 8px !important;
-          }
-          
-          #printable-invoice .mb-6 {
-            margin-bottom: 6px !important;
-          }
-          
-          #printable-invoice .mb-4 {
-            margin-bottom: 4px !important;
-          }
-          
-          #printable-invoice .mb-2 {
-            margin-bottom: 2px !important;
-          }
-          
-          #printable-invoice .pb-6 {
-            padding-bottom: 6px !important;
-          }
-          
-          #printable-invoice .pt-4 {
-            padding-top: 4px !important;
-          }
-          
-          #printable-invoice .pt-8 {
-            padding-top: 8px !important;
-          }
-          
-          #printable-invoice .mt-12 {
-            margin-top: 12px !important;
-          }
-          
-          /* Padding'leri minimize et */
-          #printable-invoice .px-4 {
-            padding-left: 6px !important;
-            padding-right: 6px !important;
-          }
-          
-          #printable-invoice .py-3 {
-            padding-top: 4px !important;
-            padding-bottom: 4px !important;
-          }
-          
-          #printable-invoice .py-2 {
-            padding-top: 3px !important;
-            padding-bottom: 3px !important;
-          }
-          
-          #printable-invoice .p-8 {
-            padding: 8px !important;
-          }
-          
-          /* Renkli yazdırma - ZORUNLU */
-          * {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-            color-adjust: exact !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }
