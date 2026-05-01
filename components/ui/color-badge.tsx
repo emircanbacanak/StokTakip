@@ -1,6 +1,7 @@
 "use client";
 
 import { getColorStyle } from "@/lib/color-map";
+import { useEffect, useState } from "react";
 
 // Arka plan renginin açık mı koyu mu olduğunu belirle
 function isLightColor(hex: string): boolean {
@@ -23,13 +24,57 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+// Hex rengi koyulaştır
+function darkenHex(hex: string, amount: number): string {
+  const h = hex.replace("#", "");
+  if (h.length < 6) return "#1a1a1a";
+  const r = Math.max(0, Math.round(parseInt(h.slice(0, 2), 16) * (1 - amount)));
+  const g = Math.max(0, Math.round(parseInt(h.slice(2, 4), 16) * (1 - amount)));
+  const b = Math.max(0, Math.round(parseInt(h.slice(4, 6), 16) * (1 - amount)));
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
+// Hex rengi açıklaştır
+function lightenHex(hex: string, amount: number): string {
+  const h = hex.replace("#", "");
+  if (h.length < 6) return "#f0f0f0";
+  const r = Math.min(255, Math.round(parseInt(h.slice(0, 2), 16) + (255 - parseInt(h.slice(0, 2), 16)) * amount));
+  const g = Math.min(255, Math.round(parseInt(h.slice(2, 4), 16) + (255 - parseInt(h.slice(2, 4), 16)) * amount));
+  const b = Math.min(255, Math.round(parseInt(h.slice(4, 6), 16) + (255 - parseInt(h.slice(4, 6), 16)) * amount));
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
 export function ColorBadge({ color, size = "md" }: { color: string; size?: "sm" | "md" | "lg" }) {
+  const [isDark, setIsDark] = useState(false);
+  
+  useEffect(() => {
+    // Check dark mode on mount
+    setIsDark(document.documentElement.classList.contains('dark'));
+    
+    // Watch for theme changes
+    const observer = new MutationObserver(() => {
+      setIsDark(document.documentElement.classList.contains('dark'));
+    });
+    
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class']
+    });
+    
+    return () => observer.disconnect();
+  }, []);
+  
   const style = getColorStyle(color);
   const dot = style.dot;
 
   const light = isLightColor(dot);
   const bgColor = hexToRgba(dot, 0.15);
-  const textColor = light ? darkenHex(dot, 0.5) : dot;
+  
+  // Dinamik renk seçimi - dark mode'da maksimum kontrast
+  const textColor = isDark
+    ? (light ? darkenHex(dot, 0.4) : lightenHex(dot, 0.95)) // Dark mode - çok açık yazılar
+    : (light ? darkenHex(dot, 0.6) : darkenHex(dot, 0.1)); // Light mode
+  
   const borderColor = hexToRgba(dot, 0.35);
 
   const sizeClass = {
@@ -69,14 +114,4 @@ export function ColorBadge({ color, size = "md" }: { color: string; size?: "sm" 
       {color}
     </span>
   );
-}
-
-// Hex rengi koyulaştır
-function darkenHex(hex: string, amount: number): string {
-  const h = hex.replace("#", "");
-  if (h.length < 6) return "#333333";
-  const r = Math.max(0, Math.round(parseInt(h.slice(0, 2), 16) * (1 - amount)));
-  const g = Math.max(0, Math.round(parseInt(h.slice(2, 4), 16) * (1 - amount)));
-  const b = Math.max(0, Math.round(parseInt(h.slice(4, 6), 16) * (1 - amount)));
-  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 }

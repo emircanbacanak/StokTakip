@@ -149,9 +149,9 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-card rounded-2xl border border-border shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 invoice-print-container">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm print:hidden" onClick={onClose} />
+      <div className="relative bg-card rounded-2xl border border-border shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col print:max-h-none print:shadow-none print:border-0">
         {/* Header */}
         <div className="px-6 py-4 border-b border-border flex items-center justify-between print:hidden">
           <div className="flex items-center gap-3">
@@ -180,11 +180,11 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
         </div>
 
         {/* Invoice Content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-3xl mx-auto bg-white text-black p-8 print:p-0">
+        <div className="flex-1 overflow-y-auto p-6 print:overflow-visible print:p-0">
+          <div id="printable-invoice" className="max-w-3xl mx-auto bg-white text-black p-4 print:max-w-none print:p-2" style={{ colorScheme: 'light' }}>
             {/* Header */}
-            <div className="mb-8 pb-6 border-b-2 border-gray-300">
-              <h1 className="text-3xl font-bold mb-2">İRSALİYE</h1>
+            <div className="mb-4 pb-3 border-b-2 border-gray-300">
+              <h1 className="text-3xl font-bold mb-1">İRSALİYE</h1>
               <div className="flex justify-between text-sm">
                 <div>
                   <p className="font-semibold">Tarih:</p>
@@ -198,21 +198,21 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
             </div>
 
             {/* Customer Info */}
-            <div className="mb-8">
-              <h2 className="text-lg font-bold mb-2">MÜŞTERİ BİLGİLERİ</h2>
+            <div className="mb-4">
+              <h2 className="text-lg font-bold mb-1">MÜŞTERİ BİLGİLERİ</h2>
               <p className="text-xl font-semibold">{order.buyer.name}</p>
             </div>
 
             {/* Items Table */}
-            <div className="mb-8">
-              <h2 className="text-lg font-bold mb-4">ÜRÜNLER</h2>
+            <div className="mb-4">
+              <h2 className="text-lg font-bold mb-2">ÜRÜNLER</h2>
               
               {Object.entries(groupedItems).map(([productName, items]) => {
                 const productTotal = items.reduce((s, i) => s + i.total, 0);
                 const productQty = items.reduce((s, i) => s + i.quantity, 0);
                 
                 return (
-                  <div key={productName} className="mb-6 border border-gray-300 rounded-lg overflow-hidden">
+                  <div key={productName} className="mb-4 border border-gray-300 rounded-lg overflow-hidden">
                     <div className="bg-gray-100 px-4 py-3 border-b border-gray-300">
                       <div className="flex justify-between items-center">
                         <h3 className="font-bold text-base">{productName}</h3>
@@ -249,19 +249,19 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
             </div>
 
             {/* Summary */}
-            <div className="border-t-2 border-gray-300 pt-4">
-              <div className="flex justify-between items-center mb-2">
-                <p className="text-lg font-semibold">Toplam Adet:</p>
-                <p className="text-xl font-bold">{totalQuantity} adet</p>
+            <div className="summary-section border-t-2 border-gray-300 pt-4 mt-4 bg-white">
+              <div className="flex justify-between items-center mb-2 bg-white">
+                <p className="text-lg font-bold text-black">Toplam Adet:</p>
+                <p className="text-2xl font-bold text-black">{totalQuantity} adet</p>
               </div>
-              <div className="flex justify-between items-center">
-                <p className="text-lg font-semibold">Toplam Tutar:</p>
-                <p className="text-2xl font-bold">{formatCurrency(totalAmount)}</p>
+              <div className="flex justify-between items-center bg-white">
+                <p className="text-lg font-bold text-black">Toplam Tutar:</p>
+                <p className="text-3xl font-bold text-black">{formatCurrency(totalAmount)}</p>
               </div>
             </div>
 
             {/* Footer */}
-            <div className="mt-12 pt-8 border-t border-gray-300 text-center text-sm text-gray-600">
+            <div className="mt-8 pt-4 border-t border-gray-300 text-center text-sm text-gray-600">
               <p>Bu belge elektronik ortamda oluşturulmuştur.</p>
             </div>
           </div>
@@ -287,21 +287,266 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
 
       <style jsx global>{`
         @media print {
+          @page {
+            margin: 0.3cm;
+            size: A4;
+          }
+          
+          /* Body ve HTML'i sıfırla */
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            height: auto !important;
+            overflow: visible !important;
+          }
+          
+          /* Her şeyi gizle */
           body * {
-            visibility: hidden;
+            visibility: hidden !important;
           }
-          .print\\:p-0,
-          .print\\:p-0 * {
-            visibility: visible;
+          
+          /* Sadece printable-invoice ve içeriğini göster */
+          #printable-invoice,
+          #printable-invoice * {
+            visibility: visible !important;
           }
-          .print\\:hidden {
-            display: none !important;
+          
+          /* Printable invoice'i normal flow'da tut - ABSOLUTE DEĞİL */
+          #printable-invoice {
+            position: static !important;
+            left: auto !important;
+            top: auto !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            background: white !important;
+            color: black !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
+            page-break-after: auto !important;
+            orphans: 3 !important;
+            widows: 3 !important;
           }
-          .print\\:p-0 {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
+          
+          /* Tüm elementleri beyaz arka plan, siyah yazı */
+          #printable-invoice * {
+            color: black !important;
+          }
+          
+          /* Summary section için özel kurallar */
+          #printable-invoice .summary-section {
+            background-color: white !important;
+            border-top: 2px solid #6b7280 !important;
+            padding-top: 12px !important;
+            margin-top: 16px !important;
+            page-break-inside: avoid !important;
+            page-break-before: auto !important;
+          }
+          
+          #printable-invoice .summary-section * {
+            background-color: white !important;
+            color: black !important;
+            font-weight: bold !important;
+          }
+          
+          /* Ürün gruplarının içindeki tabloların bölünmesine izin ver */
+          #printable-invoice .mb-4 {
+            page-break-inside: auto !important;
+          }
+          
+          /* Sadece tablo satırlarının bölünmesini engelle */
+          #printable-invoice tbody tr {
+            page-break-inside: avoid !important;
+            page-break-after: auto !important;
+          }
+          
+          /* Ürün başlıklarının yalnız kalmamasını sağla */
+          #printable-invoice .bg-gray-100 {
+            page-break-after: avoid !important;
+          }
+          
+          /* Font boyutları - KOMPAKT */
+          #printable-invoice h1 {
+            font-size: 20pt !important;
+            font-weight: bold !important;
+            margin-bottom: 4px !important;
+            margin-top: 0 !important;
+          }
+          
+          #printable-invoice h2 {
+            font-size: 12pt !important;
+            font-weight: bold !important;
+            margin-bottom: 4px !important;
+            margin-top: 8px !important;
+          }
+          
+          #printable-invoice h3 {
+            font-size: 11pt !important;
+            font-weight: bold !important;
+          }
+          
+          #printable-invoice p,
+          #printable-invoice td,
+          #printable-invoice th {
+            font-size: 9pt !important;
+            line-height: 1.2 !important;
+          }
+          
+          #printable-invoice .text-xs {
+            font-size: 7pt !important;
+          }
+          
+          #printable-invoice .text-sm {
+            font-size: 8pt !important;
+          }
+          
+          #printable-invoice .text-lg {
+            font-size: 10pt !important;
+          }
+          
+          #printable-invoice .text-xl {
+            font-size: 12pt !important;
+          }
+          
+          #printable-invoice .text-2xl {
+            font-size: 14pt !important;
+          }
+          
+          #printable-invoice .text-3xl {
+            font-size: 16pt !important;
+          }
+          
+          /* Gri arka planlar - ZORUNLU */
+          #printable-invoice .bg-gray-100 {
+            background-color: #f3f4f6 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          
+          #printable-invoice .bg-gray-50 {
+            background-color: #f9fafb !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          
+          /* Border'lar - KALIN VE NET */
+          #printable-invoice .border,
+          #printable-invoice .border-gray-300,
+          #printable-invoice .border-gray-200 {
+            border-color: #9ca3af !important;
+            border-style: solid !important;
+            border-width: 1px !important;
+          }
+          
+          #printable-invoice .border-b-2 {
+            border-bottom-width: 3px !important;
+            border-bottom-color: #6b7280 !important;
+          }
+          
+          #printable-invoice .border-t-2 {
+            border-top-width: 3px !important;
+            border-top-color: #6b7280 !important;
+          }
+          
+          #printable-invoice .border-t {
+            border-top-width: 1px !important;
+          }
+          
+          #printable-invoice .border-b {
+            border-bottom-width: 1px !important;
+          }
+          
+          /* Text colors */
+          #printable-invoice .text-gray-600 {
+            color: #4b5563 !important;
+          }
+          
+          /* Tablolar - KOMPAKT */
+          #printable-invoice table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            margin: 4px 0 !important;
+          }
+          
+          #printable-invoice th,
+          #printable-invoice td {
+            padding: 4px 6px !important;
+            text-align: left !important;
+            border: 1px solid #d1d5db !important;
+          }
+          
+          #printable-invoice th {
+            background-color: #f9fafb !important;
+            font-weight: bold !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          
+          /* Rounded corners'ı kaldır (yazdırmada sorun çıkarabilir) */
+          #printable-invoice .rounded-lg,
+          #printable-invoice .rounded-xl,
+          #printable-invoice .rounded-2xl {
+            border-radius: 0 !important;
+          }
+          
+          /* Margin ve padding'leri düzelt - ÇOK KOMPAKT */
+          #printable-invoice .mb-8 {
+            margin-bottom: 8px !important;
+          }
+          
+          #printable-invoice .mb-6 {
+            margin-bottom: 6px !important;
+          }
+          
+          #printable-invoice .mb-4 {
+            margin-bottom: 4px !important;
+          }
+          
+          #printable-invoice .mb-2 {
+            margin-bottom: 2px !important;
+          }
+          
+          #printable-invoice .pb-6 {
+            padding-bottom: 6px !important;
+          }
+          
+          #printable-invoice .pt-4 {
+            padding-top: 4px !important;
+          }
+          
+          #printable-invoice .pt-8 {
+            padding-top: 8px !important;
+          }
+          
+          #printable-invoice .mt-12 {
+            margin-top: 12px !important;
+          }
+          
+          /* Padding'leri minimize et */
+          #printable-invoice .px-4 {
+            padding-left: 6px !important;
+            padding-right: 6px !important;
+          }
+          
+          #printable-invoice .py-3 {
+            padding-top: 4px !important;
+            padding-bottom: 4px !important;
+          }
+          
+          #printable-invoice .py-2 {
+            padding-top: 3px !important;
+            padding-bottom: 3px !important;
+          }
+          
+          #printable-invoice .p-8 {
+            padding: 8px !important;
+          }
+          
+          /* Renkli yazdırma - ZORUNLU */
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
           }
         }
       `}</style>

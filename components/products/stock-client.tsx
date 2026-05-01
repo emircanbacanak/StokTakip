@@ -207,7 +207,7 @@ export function StockClient() {
                 <div className="px-4 pb-1">
                   <div className="bg-muted rounded-full h-1 overflow-hidden">
                     <div
-                      className={`h-1 rounded-full transition-all duration-500 ${bPct === 100 ? "bg-emerald-500" : "bg-gradient-to-r from-blue-500 to-violet-500"}`}
+                      className={`h-1 rounded-full transition-all duration-500 ${bPct === 100 ? "bg-emerald-500" : "bg-gradient-to-r from-amber-500 to-orange-500"}`}
                       style={{ width: `${bPct}%` }}
                     />
                   </div>

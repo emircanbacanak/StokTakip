@@ -403,7 +403,7 @@ export function ProductCatalogClient() {
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:flex items-center justify-center gap-2">
                   <button
                     onClick={() => { startEdit(p); }}
-                    className="w-8 h-8 bg-white/90 rounded-lg flex items-center justify-center text-foreground hover:bg-white transition-colors"
+                    className="w-8 h-8 bg-card/90 dark:bg-card/90 rounded-lg flex items-center justify-center text-foreground hover:bg-card transition-colors border border-border"
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>

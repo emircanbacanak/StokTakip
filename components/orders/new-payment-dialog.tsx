@@ -155,7 +155,7 @@ export function NewPaymentDialog({
                   
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">Alınan Ödeme</span>
-                    <span className="text-base font-bold text-red-500">-{formatCurrency(order.paid_amount)}</span>
+                    <span className="text-base font-bold text-emerald-600">-{formatCurrency(order.paid_amount)}</span>
                   </div>
                   
                   <div className="h-px bg-blue-500/20 my-2" />
@@ -197,7 +197,7 @@ export function NewPaymentDialog({
                 
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-muted-foreground">Ödenen</span>
-                  <span className="text-base font-bold text-red-500">-{formatCurrency(order.paid_amount)}</span>
+                  <span className="text-base font-bold text-emerald-600">-{formatCurrency(order.paid_amount)}</span>
                 </div>
                 
                 <div className="h-px bg-border my-2" />

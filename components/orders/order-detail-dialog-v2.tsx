@@ -447,7 +447,7 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <button onClick={() => setShowInvoice(true)}
-                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-500/10 px-2.5 py-1.5 rounded-lg transition-all border border-blue-500/20">
+                  className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-500/10 px-2.5 py-1.5 rounded-lg transition-all border border-blue-500/20">
                   <FileText className="w-3 h-3" /><span>Fiş</span>
                 </button>
                 <button onClick={() => setShowEditOrder(true)}
