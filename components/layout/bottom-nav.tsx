@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ShoppingCart, Factory, Users, Package, Palette } from "lucide-react";
+import { LayoutDashboard, ShoppingCart, Factory, Users, Package, Calculator } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -11,7 +11,7 @@ const navItems = [
   { href: "/dashboard/production", label: "Üretim", icon: Factory },
   { href: "/dashboard/buyers", label: "Alıcılar", icon: Users },
   { href: "/dashboard/products", label: "Stok", icon: Package },
-  { href: "/dashboard/colors", label: "Renkler", icon: Palette },
+  { href: "/dashboard/accounting", label: "Muhasebe", icon: Calculator },
 ];
 
 export function BottomNav() {
