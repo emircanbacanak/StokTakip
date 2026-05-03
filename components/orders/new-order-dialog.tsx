@@ -310,8 +310,10 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
                         type="number" 
                         min="0" 
                         step="0.01" 
-                        value={item.unit_price || 0} 
+                        value={item.unit_price === 0 ? "" : item.unit_price} 
                         onChange={(e) => updateUnitPrice(itemIdx, parseFloat(e.target.value) || 0)} 
+                        onFocus={(e) => e.target.select()}
+                        onWheel={(e) => e.currentTarget.blur()}
                         className={inputCls}
                         placeholder="0.00"
                       />
@@ -438,8 +440,23 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
                             <input 
                               type="number" 
                               min="1" 
-                              value={colorItem.quantity || 1} 
-                              onChange={(e) => updateColor(itemIdx, colorIdx, "quantity", parseInt(e.target.value) || 1)} 
+                              value={colorItem.quantity === 1 ? "" : colorItem.quantity} 
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === "") {
+                                  updateColor(itemIdx, colorIdx, "quantity", 1);
+                                } else {
+                                  updateColor(itemIdx, colorIdx, "quantity", parseInt(val) || 1);
+                                }
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              onBlur={(e) => {
+                                if (e.target.value === "") {
+                                  updateColor(itemIdx, colorIdx, "quantity", 1);
+                                }
+                              }}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              placeholder="1"
                               className={inputCls + " text-xs text-center"} 
                             />
                           </div>

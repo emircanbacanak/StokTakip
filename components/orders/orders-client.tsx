@@ -96,6 +96,7 @@ export function OrdersClient() {
   const [loading, setLoading] = useState(true);
   const [newOpen, setNewOpen] = useState(false);
   const [selected, setSelected] = useState<Order | null>(null);
+  const [activeTab, setActiveTab] = useState<OrderStatus>("pending");
   const { toast } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
 
@@ -135,7 +136,11 @@ export function OrdersClient() {
   // Group by buyer
   const groups: BuyerGroup[] = [];
   const seen: Record<string, BuyerGroup> = {};
-  orders.forEach((o) => {
+  
+  // Tab'a göre filtrele
+  const filteredOrders = orders.filter(o => o.status === activeTab);
+  
+  filteredOrders.forEach((o) => {
     if (!seen[o.buyer.id]) {
       seen[o.buyer.id] = { buyer_id: o.buyer.id, buyer_name: o.buyer.name, orders: [] };
       groups.push(seen[o.buyer.id]);
@@ -160,6 +165,50 @@ export function OrdersClient() {
 
   return (
     <div className="space-y-4">
+      {/* Tabs */}
+      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+        <button
+          onClick={() => setActiveTab("pending")}
+          className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all ${
+            activeTab === "pending"
+              ? "bg-amber-500 text-white shadow-lg shadow-amber-500/25"
+              : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-amber-500/30"
+          }`}
+        >
+          Bekliyor
+        </button>
+        <button
+          onClick={() => setActiveTab("in_production")}
+          className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all ${
+            activeTab === "in_production"
+              ? "bg-blue-500 text-white shadow-lg shadow-blue-500/25"
+              : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-blue-500/30"
+          }`}
+        >
+          Üretimde
+        </button>
+        <button
+          onClick={() => setActiveTab("completed")}
+          className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all ${
+            activeTab === "completed"
+              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/25"
+              : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-emerald-500/30"
+          }`}
+        >
+          Tamamlandı
+        </button>
+        <button
+          onClick={() => setActiveTab("delivered")}
+          className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all ${
+            activeTab === "delivered"
+              ? "bg-gray-500 text-white shadow-lg shadow-gray-500/25"
+              : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-gray-500/30"
+          }`}
+        >
+          Teslim Edildi
+        </button>
+      </div>
+
       <div className="flex items-center justify-between">
         <p className="text-base text-muted-foreground">{groups.length} alıcı · {orders.length} sipariş</p>
         <button

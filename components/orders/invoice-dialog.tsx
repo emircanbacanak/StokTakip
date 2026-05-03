@@ -176,6 +176,8 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
       color: #000;
       background: #fff;
       line-height: 1.4;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
     
     .container {
@@ -276,6 +278,29 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
       
       .summary {
         page-break-inside: avoid !important;
+      }
+      
+      /* Mobil için özel kurallar */
+      @media (max-width: 768px) {
+        body {
+          width: 100% !important;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+        
+        .container {
+          width: 100% !important;
+          max-width: 100% !important;
+        }
+        
+        /* Sayfa kırılmalarını zorla */
+        * {
+          page-break-inside: auto !important;
+        }
+        
+        table tr {
+          page-break-inside: avoid !important;
+        }
       }
     }
   </style>
