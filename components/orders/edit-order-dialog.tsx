@@ -304,11 +304,10 @@ export function EditOrderDialog({
                         <label className="text-[10px] text-muted-foreground mb-1.5 block font-medium">BİRİM FİYAT (₺)</label>
                         <input
                           type="number" min="0" step="0.01"
-                          value={item.unit_price === 0 ? "" : item.unit_price}
+                          value={item.unit_price}
                           onChange={(e) => updateUnitPrice(itemIdx, parseFloat(e.target.value) || 0)}
                           onFocus={(e) => e.target.select()}
                           onWheel={(e) => e.currentTarget.blur()}
-                          placeholder="0.00"
                           className={inputCls}
                         />
                       </div>
@@ -390,25 +389,24 @@ export function EditOrderDialog({
                             <div>
                               {colorIdx === 0 && <label className="text-[9px] text-muted-foreground mb-1 block">ADET</label>}
                               <input 
-                                type="number" 
-                                min="1" 
-                                value={colorItem.quantity === 1 ? "" : colorItem.quantity}
+                                type="text"
+                                inputMode="numeric"
+                                value={colorItem.quantity}
                                 onChange={(e) => {
                                   const val = e.target.value;
-                                  if (val === "") {
-                                    updateColor(itemIdx, colorIdx, "quantity", 1);
-                                  } else {
-                                    updateColor(itemIdx, colorIdx, "quantity", parseInt(val) || 1);
+                                  // Sadece rakam girişine izin ver
+                                  if (val === "" || /^\d+$/.test(val)) {
+                                    updateColor(itemIdx, colorIdx, "quantity", val === "" ? "" as any : parseInt(val));
                                   }
                                 }}
                                 onFocus={(e) => e.target.select()}
                                 onBlur={(e) => {
-                                  if (e.target.value === "") {
+                                  const val = e.target.value;
+                                  if (val === "" || parseInt(val) < 1) {
                                     updateColor(itemIdx, colorIdx, "quantity", 1);
                                   }
                                 }}
                                 onWheel={(e) => e.currentTarget.blur()}
-                                placeholder="1"
                                 className={inputCls + " text-xs text-center"} 
                               />
                             </div>
