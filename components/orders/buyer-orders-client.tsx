@@ -203,7 +203,42 @@ export function BuyerOrdersClient({ buyerId }: { buyerId: string }) {
     setLoading(false);
   }, [buyerId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { 
+    load(); 
+    
+    // Supabase Realtime subscription - orders ve order_items değişikliklerini dinle
+    const sb = createClient();
+    const ordersChannel = sb
+      .channel('buyer-orders-orders-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders'
+        },
+        () => load()
+      )
+      .subscribe();
+      
+    const itemsChannel = sb
+      .channel('buyer-orders-items-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'order_items'
+        },
+        () => load()
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(ordersChannel);
+      sb.removeChannel(itemsChannel);
+    };
+  }, [load]);
 
   async function del(id: string, e: React.MouseEvent) {
     e.stopPropagation();

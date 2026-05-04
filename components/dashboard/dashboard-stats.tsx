@@ -41,7 +41,41 @@ export function DashboardStats() {
       }
       setLoading(false);
     }
+    
     load();
+    
+    // Supabase Realtime subscription - orders ve order_items değişikliklerini dinle
+    const sb = createClient();
+    const ordersChannel = sb
+      .channel('dashboard-orders-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders'
+        },
+        () => load()
+      )
+      .subscribe();
+      
+    const itemsChannel = sb
+      .channel('dashboard-items-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'order_items'
+        },
+        () => load()
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(ordersChannel);
+      sb.removeChannel(itemsChannel);
+    };
   }, []);
 
   const cards = [

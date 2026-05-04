@@ -80,7 +80,31 @@ export function ProductionClient() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { 
+    load(); 
+    
+    // Supabase Realtime subscription - order_items tablosundaki değişiklikleri dinle
+    const sb = createClient();
+    const channel = sb
+      .channel('production-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'order_items'
+        },
+        () => {
+          // Herhangi bir değişiklik olduğunda verileri yeniden yükle
+          load();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(channel);
+    };
+  }, [load]);
 
   async function update(id: string, cur: number, delta: number, max: number) {
     // max'tan fazla üretim yapılabilir (fazla üretim durumu)

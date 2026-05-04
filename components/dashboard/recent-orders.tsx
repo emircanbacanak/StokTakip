@@ -24,12 +24,37 @@ export function RecentOrders() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let sb; try { sb = createClient(); } catch { setLoading(false); return; }
-    sb.from("orders")
-      .select("id, created_at, total_amount, status, buyer:buyers(name)")
-      .order("created_at", { ascending: false })
-      .limit(5)
-      .then(({ data }) => { if (data) setOrders(data as unknown as RecentOrder[]); setLoading(false); });
+    const sb = createClient();
+    
+    async function loadOrders() {
+      const { data } = await sb
+        .from("orders")
+        .select("id, created_at, total_amount, status, buyer:buyers(name)")
+        .order("created_at", { ascending: false })
+        .limit(5);
+      if (data) setOrders(data as unknown as RecentOrder[]);
+      setLoading(false);
+    }
+    
+    loadOrders();
+    
+    // Supabase Realtime subscription - orders değişikliklerini dinle
+    const channel = sb
+      .channel('recent-orders-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders'
+        },
+        () => loadOrders()
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(channel);
+    };
   }, []);
 
   return (

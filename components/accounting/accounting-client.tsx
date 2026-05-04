@@ -166,6 +166,39 @@ export function AccountingClient() {
     }
 
     load();
+    
+    // Supabase Realtime subscription - orders ve order_items değişikliklerini dinle
+    const sb = createClient();
+    const ordersChannel = sb
+      .channel('accounting-orders-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders'
+        },
+        () => load()
+      )
+      .subscribe();
+      
+    const itemsChannel = sb
+      .channel('accounting-items-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'order_items'
+        },
+        () => load()
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(ordersChannel);
+      sb.removeChannel(itemsChannel);
+    };
   }, []);
 
   const totalRevenue = buyerSummaries.reduce((sum, b) => sum + b.total_amount, 0);

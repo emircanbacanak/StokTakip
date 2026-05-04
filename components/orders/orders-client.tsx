@@ -111,7 +111,42 @@ export function OrdersClient() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { 
+    load(); 
+    
+    // Supabase Realtime subscription - orders ve order_items değişikliklerini dinle
+    const sb = createClient();
+    const ordersChannel = sb
+      .channel('orders-page-orders-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders'
+        },
+        () => load()
+      )
+      .subscribe();
+      
+    const itemsChannel = sb
+      .channel('orders-page-items-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'order_items'
+        },
+        () => load()
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(ordersChannel);
+      sb.removeChannel(itemsChannel);
+    };
+  }, [load]);
 
   async function del(id: string, e: React.MouseEvent) {
     e.stopPropagation();
