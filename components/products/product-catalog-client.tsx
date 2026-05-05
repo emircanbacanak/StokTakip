@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Plus, Trash2, ImageIcon, Loader2, Package, Pencil, X, Check } from "lucide-react";
+import { Plus, Trash2, ImageIcon, Loader2, Package, Pencil, X, Check, Scale } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/hooks/use-confirm";
-import type { Product } from "@/lib/types/database";
+import type { Product, CostSettings } from "@/lib/types/database";
+import { calculateProductCost, DEFAULT_COST_SETTINGS } from "@/lib/cost-calculator";
+import { formatCurrency } from "@/lib/utils";
 
 const inputCls =
   "w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all";
@@ -58,14 +60,32 @@ interface ProductFormProps {
 function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
+  const [weightGrams, setWeightGrams] = useState<string>(
+    initial?.weight_grams ? String(initial.weight_grams) : ""
+  );
   const [imagePreview, setImagePreview] = useState<string | null>(initial?.image_url ?? null);
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [removedBgImage, setRemovedBgImage] = useState<string | null>(null);
   const [useOriginal, setUseOriginal] = useState(true);
   const [removingBg, setRemovingBg] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [costSettings, setCostSettings] = useState<CostSettings | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  // Maliyet ayarlarını yükle
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        const sb = createClient();
+        const { data } = await sb.from("cost_settings").select("*").limit(1).single();
+        if (data) setCostSettings(data);
+      } catch {
+        setCostSettings({ id: "", ...DEFAULT_COST_SETTINGS, updated_at: "", updated_by: null });
+      }
+    }
+    loadSettings();
+  }, []);
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -133,9 +153,9 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
     }
 
     if (initial) {
-      await sb.from("products").update({ name: name.trim(), description: description.trim() || null, image_url: imageUrl }).eq("id", initial.id);
+      await sb.from("products").update({ name: name.trim(), description: description.trim() || null, image_url: imageUrl, weight_grams: parseFloat(weightGrams) || 0 }).eq("id", initial.id);
     } else {
-      await sb.from("products").insert({ id, name: name.trim(), description: description.trim() || null, image_url: imageUrl });
+      await sb.from("products").insert({ id, name: name.trim(), description: description.trim() || null, image_url: imageUrl, weight_grams: parseFloat(weightGrams) || 0 });
     }
 
     toast({ title: initial ? "Ürün güncellendi ✓" : "Ürün eklendi ✓" });
@@ -237,6 +257,78 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
         <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Açıklama</label>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ürün açıklaması..." rows={2} className={inputCls + " resize-none"} />
       </div>
+
+      {/* Gramaj */}
+      <div>
+        <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block flex items-center gap-1">
+          <Scale className="w-3 h-3" /> Gramaj (gr)
+        </label>
+        <input
+          type="number"
+          step="0.1"
+          min="0"
+          value={weightGrams}
+          onChange={(e) => setWeightGrams(e.target.value)}
+          placeholder="Örn: 40"
+          className={inputCls}
+        />
+        <p className="text-[10px] text-muted-foreground mt-1">
+          Ürünün baskı ağırlığı. Maliyet hesaplaması için gereklidir.
+        </p>
+      </div>
+
+      {/* Maliyet Önizlemesi */}
+      {costSettings && parseFloat(weightGrams) > 0 && (() => {
+        const w = parseFloat(weightGrams);
+        const calc = calculateProductCost(w, costSettings);
+        return (
+          <div className="bg-gradient-to-br from-blue-50 to-violet-50 dark:from-blue-950/20 dark:to-violet-950/20 rounded-xl border border-blue-200 dark:border-blue-900 p-3 space-y-2">
+            <p className="text-[10px] font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wider">
+              Maliyet Önizlemesi
+            </p>
+            <div className="space-y-1 text-xs">
+              {/* Gramaj bilgileri */}
+              <div className="flex justify-between text-muted-foreground">
+                <span>Ham gramaj:</span>
+                <span className="font-medium text-foreground">{w.toFixed(1)} gr</span>
+              </div>
+              {costSettings.waste_enabled && (
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Fire dahil gramaj (%{costSettings.waste_percentage}):</span>
+                  <span className="font-medium text-orange-600 dark:text-orange-400">{calc.weightWithWasteGrams.toFixed(1)} gr</span>
+                </div>
+              )}
+              <div className="h-px bg-blue-200 dark:bg-blue-800 my-1" />
+              {/* Maliyet kalemleri */}
+              {calc.breakdown.filter(b => b.enabled).map((b, i) => (
+                <div key={i} className="flex justify-between text-muted-foreground">
+                  <span>{b.label}:</span>
+                  <span className="font-medium text-foreground">{formatCurrency(b.value)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between font-semibold border-t border-blue-200 dark:border-blue-800 pt-1 mt-1">
+                <span className="text-foreground">Toplam Maliyet:</span>
+                <span className="text-blue-600 dark:text-blue-400">{formatCurrency(calc.totalCost)}</span>
+              </div>
+            </div>
+            {/* Önerilen satış fiyatları */}
+            <div className="grid grid-cols-5 gap-1 pt-1 border-t border-blue-200 dark:border-blue-800">
+              {[
+                { label: `%${costSettings.profit_margin_1}`, price: calc.suggestedPrices.margin10 },
+                { label: `%${costSettings.profit_margin_2}`, price: calc.suggestedPrices.margin20 },
+                { label: `%${costSettings.profit_margin_3}`, price: calc.suggestedPrices.margin30 },
+                { label: `%${costSettings.profit_margin_4}`, price: calc.suggestedPrices.margin40 },
+                { label: `%${costSettings.profit_margin_5}`, price: calc.suggestedPrices.margin50 },
+              ].map((item, i) => (
+                <div key={i} className="text-center">
+                  <p className="text-[9px] text-muted-foreground">{item.label}</p>
+                  <p className="text-[11px] font-bold text-foreground">{formatCurrency(item.price)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="flex gap-2 pt-1">
         <button onClick={onCancel} className="flex-1 border border-border text-foreground font-semibold py-2.5 rounded-xl text-sm hover:bg-muted transition-all">
@@ -418,6 +510,12 @@ export function ProductCatalogClient() {
               <div className="p-3">
                 <p className="font-semibold text-sm text-foreground truncate">{p.name}</p>
                 {p.description && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{p.description}</p>}
+                {p.weight_grams > 0 && (
+                  <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mt-1 flex items-center gap-1">
+                    <Scale className="w-3 h-3" />
+                    {p.weight_grams} gr
+                  </p>
+                )}
                 {/* Mobil butonlar */}
                 <div className="flex gap-2 mt-2 sm:hidden">
                   <button

@@ -15,6 +15,7 @@ export type Database = {
           name: string;
           description: string | null;
           image_url: string | null;
+          weight_grams: number;
           created_at: string;
         };
         Insert: {
@@ -22,6 +23,7 @@ export type Database = {
           name: string;
           description?: string | null;
           image_url?: string | null;
+          weight_grams?: number;
           created_at?: string;
         };
         Update: {
@@ -29,9 +31,233 @@ export type Database = {
           name?: string;
           description?: string | null;
           image_url?: string | null;
+          weight_grams?: number;
           created_at?: string;
         };
         Relationships: [];
+      };
+      cost_settings: {
+        Row: {
+          id: string;
+          filament_price_per_kg: number;
+          filament_enabled: boolean;
+          electricity_cost_per_gram: number;
+          electricity_enabled: boolean;
+          waste_percentage: number;
+          waste_enabled: boolean;
+          depreciation_cost_per_gram: number;
+          depreciation_enabled: boolean;
+          profit_margin_1: number;
+          profit_margin_2: number;
+          profit_margin_3: number;
+          profit_margin_4: number;
+          profit_margin_5: number;
+          price_rounding_enabled: boolean;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          filament_price_per_kg?: number;
+          filament_enabled?: boolean;
+          electricity_cost_per_gram?: number;
+          electricity_enabled?: boolean;
+          waste_percentage?: number;
+          waste_enabled?: boolean;
+          depreciation_cost_per_gram?: number;
+          depreciation_enabled?: boolean;
+          profit_margin_1?: number;
+          profit_margin_2?: number;
+          profit_margin_3?: number;
+          profit_margin_4?: number;
+          profit_margin_5?: number;
+          price_rounding_enabled?: boolean;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          id?: string;
+          filament_price_per_kg?: number;
+          filament_enabled?: boolean;
+          electricity_cost_per_gram?: number;
+          electricity_enabled?: boolean;
+          waste_percentage?: number;
+          waste_enabled?: boolean;
+          depreciation_cost_per_gram?: number;
+          depreciation_enabled?: boolean;
+          profit_margin_1?: number;
+          profit_margin_2?: number;
+          profit_margin_3?: number;
+          profit_margin_4?: number;
+          profit_margin_5?: number;
+          price_rounding_enabled?: boolean;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
+      product_costs: {
+        Row: {
+          id: string;
+          product_id: string;
+          product_name: string;
+          weight_grams: number;
+          filament_price_per_kg: number;
+          electricity_cost_per_gram: number;
+          waste_percentage: number;
+          depreciation_cost_per_gram: number;
+          raw_filament_cost: number;
+          electricity_cost: number;
+          waste_cost: number;
+          depreciation_cost: number;
+          total_cost: number;
+          weight_with_waste_grams: number;
+          suggested_price_10: number;
+          suggested_price_20: number;
+          suggested_price_30: number;
+          suggested_price_40: number;
+          suggested_price_50: number;
+          calculated_at: string;
+          is_active: boolean;
+        };
+        Insert: {
+          id?: string;
+          product_id: string;
+          product_name: string;
+          weight_grams: number;
+          filament_price_per_kg: number;
+          electricity_cost_per_gram: number;
+          waste_percentage: number;
+          depreciation_cost_per_gram: number;
+          raw_filament_cost: number;
+          electricity_cost: number;
+          waste_cost: number;
+          depreciation_cost: number;
+          total_cost: number;
+          weight_with_waste_grams: number;
+          suggested_price_10: number;
+          suggested_price_20: number;
+          suggested_price_30: number;
+          suggested_price_40: number;
+          suggested_price_50: number;
+          calculated_at?: string;
+          is_active?: boolean;
+        };
+        Update: {
+          id?: string;
+          product_id?: string;
+          product_name?: string;
+          weight_grams?: number;
+          filament_price_per_kg?: number;
+          electricity_cost_per_gram?: number;
+          waste_percentage?: number;
+          depreciation_cost_per_gram?: number;
+          raw_filament_cost?: number;
+          electricity_cost?: number;
+          waste_cost?: number;
+          depreciation_cost?: number;
+          total_cost?: number;
+          weight_with_waste_grams?: number;
+          suggested_price_10?: number;
+          suggested_price_20?: number;
+          suggested_price_30?: number;
+          suggested_price_40?: number;
+          suggested_price_50?: number;
+          calculated_at?: string;
+          is_active?: boolean;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "product_costs_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      order_cost_analysis: {
+        Row: {
+          id: string;
+          order_id: string;
+          buyer_name: string;
+          order_date: string;
+          total_items_count: number;
+          total_quantity: number;
+          total_weight_grams: number;
+          total_weight_with_waste_grams: number;
+          filament_price_per_kg: number;
+          electricity_cost_per_gram: number;
+          waste_percentage: number;
+          depreciation_cost_per_gram: number;
+          total_filament_cost: number;
+          total_electricity_cost: number;
+          total_waste_cost: number;
+          total_depreciation_cost: number;
+          total_production_cost: number;
+          total_revenue: number;
+          total_profit: number;
+          profit_margin_percentage: number;
+          calculated_at: string;
+          notes: string | null;
+        };
+        Insert: {
+          id?: string;
+          order_id: string;
+          buyer_name: string;
+          order_date: string;
+          total_items_count: number;
+          total_quantity: number;
+          total_weight_grams: number;
+          total_weight_with_waste_grams: number;
+          filament_price_per_kg: number;
+          electricity_cost_per_gram: number;
+          waste_percentage: number;
+          depreciation_cost_per_gram: number;
+          total_filament_cost: number;
+          total_electricity_cost: number;
+          total_waste_cost: number;
+          total_depreciation_cost: number;
+          total_production_cost: number;
+          total_revenue: number;
+          total_profit: number;
+          profit_margin_percentage: number;
+          calculated_at?: string;
+          notes?: string | null;
+        };
+        Update: {
+          id?: string;
+          order_id?: string;
+          buyer_name?: string;
+          order_date?: string;
+          total_items_count?: number;
+          total_quantity?: number;
+          total_weight_grams?: number;
+          total_weight_with_waste_grams?: number;
+          filament_price_per_kg?: number;
+          electricity_cost_per_gram?: number;
+          waste_percentage?: number;
+          depreciation_cost_per_gram?: number;
+          total_filament_cost?: number;
+          total_electricity_cost?: number;
+          total_waste_cost?: number;
+          total_depreciation_cost?: number;
+          total_production_cost?: number;
+          total_revenue?: number;
+          total_profit?: number;
+          profit_margin_percentage?: number;
+          calculated_at?: string;
+          notes?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "order_cost_analysis_order_id_fkey";
+            columns: ["order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       buyers: {
         Row: {
@@ -300,6 +526,16 @@ export type Database = {
 // Kolay kullanım için tip kısayolları
 export type Product = Database["public"]["Tables"]["products"]["Row"];
 export type ProductInsert = Database["public"]["Tables"]["products"]["Insert"];
+
+export type CostSettings = Database["public"]["Tables"]["cost_settings"]["Row"];
+export type CostSettingsInsert = Database["public"]["Tables"]["cost_settings"]["Insert"];
+export type CostSettingsUpdate = Database["public"]["Tables"]["cost_settings"]["Update"];
+
+export type ProductCost = Database["public"]["Tables"]["product_costs"]["Row"];
+export type ProductCostInsert = Database["public"]["Tables"]["product_costs"]["Insert"];
+
+export type OrderCostAnalysis = Database["public"]["Tables"]["order_cost_analysis"]["Row"];
+export type OrderCostAnalysisInsert = Database["public"]["Tables"]["order_cost_analysis"]["Insert"];
 
 export type Buyer = Database["public"]["Tables"]["buyers"]["Row"];
 export type BuyerInsert = Database["public"]["Tables"]["buyers"]["Insert"];
