@@ -72,12 +72,9 @@ export interface OrderCostAnalysisResult {
  * Fiyatı 0 veya 5'e yuvarlar
  */
 export function roundToNearest5(price: number): number {
-  // Önce en yakın tam sayıya yuvarla
+  if (price <= 0) return 0;
   let rounded = Math.round(price);
-  
-  // Son basamağı kontrol et
   const lastDigit = rounded % 10;
-  
   if (lastDigit === 1 || lastDigit === 2) {
     rounded = Math.floor(rounded / 10) * 10;
   } else if (lastDigit === 3 || lastDigit === 4 || lastDigit === 6 || lastDigit === 7) {
@@ -85,7 +82,6 @@ export function roundToNearest5(price: number): number {
   } else if (lastDigit === 8 || lastDigit === 9) {
     rounded = Math.ceil(rounded / 10) * 10;
   }
-  
   return rounded;
 }
 
@@ -223,7 +219,7 @@ export function calculateOrderCostAnalysis(
     totalRevenue += item.quantity * item.unitPrice;
   });
   
-  const totalCost = totalFilament + totalElectricity + totalWaste + totalDepreciation;
+  const totalCost = totalFilament + totalElectricity + totalDepreciation;
   const totalProfit = totalRevenue - totalCost;
   const profitMarginPercentage = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
   

@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { NewDeliveryDialog } from "./new-delivery-dialog";
 import { NewPaymentDialog } from "./new-payment-dialog";
 import { EditOrderDialog } from "./edit-order-dialog";
+import { EditDeliveryDialog } from "./edit-delivery-dialog";
 import { InvoiceDialog } from "./invoice-dialog";
 import { FilamentInputDialog } from "./filament-input-dialog";
 import { ColorBadge } from "@/components/ui/color-badge";
@@ -319,6 +320,8 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
   const [showNewDelivery, setShowNewDelivery] = useState(false);
   const [showNewPayment, setShowNewPayment] = useState(false);
   const [showEditOrder, setShowEditOrder] = useState(false);
+  const [showEditDelivery, setShowEditDelivery] = useState(false);
+  const [editingDelivery, setEditingDelivery] = useState<DeliveryWithItems | null>(null);
   const [showInvoice, setShowInvoice] = useState(false);
   const [showFilamentDialog, setShowFilamentDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<"items" | "deliveries" | "payments">("items");
@@ -403,17 +406,9 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
   const actualTotalAmount = order.total_amount + overProductionValue;
   const actualDebt = actualTotalAmount - order.paid_amount;
   
-  // Beklenen ödeme hesaplaması - teslim edilen + fazla üretim
-  const expectedPayment = order.items.reduce((sum, item) => {
-    const dq = item.delivered_quantity || 0;
-    const baseValue = (dq / item.quantity) * (item.quantity * (item.unit_price || 0));
-    
-    // Fazla üretim değeri ekle
-    const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
-    const overValue = overProduced * (item.unit_price || 0);
-    
-    return sum + baseValue + overValue;
-  }, 0);
+  // Beklenen ödeme = gerçek toplam tutar (sipariş + fazla üretim)
+  // Teslim edilmiş siparişlerde tüm tutar ödenmiş olmalı
+  const expectedPayment = actualTotalAmount;
   const paymentDiff = order.paid_amount - expectedPayment;
   
   // Sadece ödeme alındıysa ve beklenen ödemeden farklıysa uyarı göster
@@ -572,10 +567,17 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
                   </div>
                 ) : deliveries.map((delivery) => {
                   const totalQty = delivery.items.reduce((sum, di) => sum + di.quantity, 0);
+                  // delivery_items boşsa order_items.delivered_quantity toplamını fallback olarak kullan
+                  const fallbackQty = totalQty === 0
+                    ? order.items.reduce((sum, oi) => sum + (oi.delivered_quantity || 0), 0)
+                    : 0;
+                  const displayQty = totalQty > 0 ? totalQty : fallbackQty;
+                  const hasNoItems = delivery.items.length === 0;
                   
                   // Ürün bazlı gruplama
                   const productGroups = new Map<string, typeof delivery.items>();
                   delivery.items.forEach((item) => {
+                    if (!item.order_item) return;
                     if (!productGroups.has(item.order_item.product_name)) {
                       productGroups.set(item.order_item.product_name, []);
                     }
@@ -589,42 +591,89 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
                           <Truck className="w-4 h-4 text-blue-600" />
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm font-semibold text-foreground">{totalQty} adet teslim edildi</p>
+                          <p className="text-sm font-semibold text-foreground">{displayQty} adet teslim edildi</p>
                           <p className="text-xs text-muted-foreground">{formatDate(delivery.delivery_date)}</p>
                         </div>
                         <button
+                          onClick={() => {
+                            setEditingDelivery(delivery);
+                            setShowEditDelivery(true);
+                          }}
+                          className="p-2 text-muted-foreground/40 hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"
+                          title="Düzenle"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => setDeletingDeliveryId(delivery.id)}
                           className="p-2 text-muted-foreground/40 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                          title="Sil"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                       
                       {/* Ürün grupları */}
-                      <div className="divide-y divide-border">
-                        {Array.from(productGroups.entries()).map(([productName, items]) => {
-                          const productTotal = items.reduce((sum, i) => sum + i.quantity, 0);
-                          return (
-                            <div key={productName} className="px-4 py-3">
-                              <div className="flex items-center justify-between mb-2">
-                                <p className="text-sm font-semibold text-foreground">{productName}</p>
-                                <span className="text-xs font-bold text-muted-foreground">{productTotal} adet</span>
-                              </div>
-                              <div className="space-y-1.5 pl-2">
-                                {items.map((di) => (
-                                  <div key={di.id} className="flex items-center justify-between text-xs">
-                                    <div className="flex items-center gap-2">
-                                      <ColorBadge color={di.order_item.color} size="sm" />
-                                      <span className="text-muted-foreground">{di.order_item.color}</span>
-                                    </div>
-                                    <span className="font-semibold text-foreground">{di.quantity} adet</span>
+                      {hasNoItems && fallbackQty > 0 ? (
+                        // delivery_items boş ama delivered_quantity var → order_items'dan göster
+                        <div className="divide-y divide-border">
+                          {order.items
+                            .filter((oi) => (oi.delivered_quantity || 0) > 0)
+                            .reduce((groups, oi) => {
+                              const existing = groups.find((g) => g.productName === oi.product_name);
+                              if (existing) { existing.items.push(oi); }
+                              else { groups.push({ productName: oi.product_name, items: [oi] }); }
+                              return groups;
+                            }, [] as { productName: string; items: OrderItem[] }[])
+                            .map(({ productName, items: productItems }) => {
+                              const productTotal = productItems.reduce((sum, i) => sum + (i.delivered_quantity || 0), 0);
+                              return (
+                                <div key={productName} className="px-4 py-3">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <p className="text-sm font-semibold text-foreground">{productName}</p>
+                                    <span className="text-xs font-bold text-muted-foreground">{productTotal} adet</span>
                                   </div>
-                                ))}
+                                  <div className="space-y-1.5 pl-2">
+                                    {productItems.map((oi) => (
+                                      <div key={oi.id} className="flex items-center justify-between text-xs">
+                                        <div className="flex items-center gap-2">
+                                          <ColorBadge color={oi.color} size="sm" />
+                                          <span className="text-muted-foreground">{oi.color}</span>
+                                        </div>
+                                        <span className="font-semibold text-foreground">{oi.delivered_quantity} adet</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-border">
+                          {Array.from(productGroups.entries()).map(([productName, items]) => {
+                            const productTotal = items.reduce((sum, i) => sum + i.quantity, 0);
+                            return (
+                              <div key={productName} className="px-4 py-3">
+                                <div className="flex items-center justify-between mb-2">
+                                  <p className="text-sm font-semibold text-foreground">{productName}</p>
+                                  <span className="text-xs font-bold text-muted-foreground">{productTotal} adet</span>
+                                </div>
+                                <div className="space-y-1.5 pl-2">
+                                  {items.map((di) => (
+                                    <div key={di.id} className="flex items-center justify-between text-xs">
+                                      <div className="flex items-center gap-2">
+                                        <ColorBadge color={di.order_item.color} size="sm" />
+                                        <span className="text-muted-foreground">{di.order_item.color}</span>
+                                      </div>
+                                      <span className="font-semibold text-foreground">{di.quantity} adet</span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                            );
+                          })}
+                        </div>
+                      )}
                       
                       {delivery.notes && (
                         <div className="px-4 py-3 border-t border-border bg-muted/20">
@@ -702,6 +751,22 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
       {showNewDelivery && (
         <NewDeliveryDialog order={order} onClose={() => setShowNewDelivery(false)}
           onSuccess={() => { setShowNewDelivery(false); loadDetails(); onStatusChange(); }} />
+      )}
+      {showEditDelivery && editingDelivery && (
+        <EditDeliveryDialog 
+          order={order} 
+          delivery={editingDelivery}
+          onClose={() => {
+            setShowEditDelivery(false);
+            setEditingDelivery(null);
+          }}
+          onSuccess={() => { 
+            setShowEditDelivery(false); 
+            setEditingDelivery(null);
+            loadDetails(); 
+            onStatusChange(); 
+          }} 
+        />
       )}
       {showNewPayment && (
         <NewPaymentDialog order={order} onClose={() => setShowNewPayment(false)}

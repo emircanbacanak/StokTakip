@@ -81,7 +81,6 @@ interface ProductSummary {
   order_count: number;
 }
 export function AccountingOverviewTab() {
-  const sb = createClient();
   const [loading, setLoading] = useState(true);
   const [allOrders, setAllOrders] = useState<RawOrder[]>([]);
   const [dateRange, setDateRange] = useState<DateRange>("all");
@@ -89,6 +88,7 @@ export function AccountingOverviewTab() {
 
   // ─── Data loading ──────────────────────────────────────────────────────────
   useEffect(() => {
+    const sb = createClient();
     async function load() {
       setLoading(true);
       const { data } = await sb.from("orders").select(`

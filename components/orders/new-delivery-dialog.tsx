@@ -147,7 +147,11 @@ export function NewDeliveryDialog({
         }))
       );
 
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        // delivery_items eklenemezse deliveries kaydını da sil (tutarlılık)
+        await sb.from("deliveries").delete().eq("id", delivery.id);
+        throw itemsError;
+      }
 
       toast({ title: "Teslimat kaydedildi ✓" });
       onSuccess();

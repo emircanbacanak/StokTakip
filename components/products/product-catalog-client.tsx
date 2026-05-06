@@ -149,13 +149,35 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
     if (imagePreview && imagePreview !== initial?.image_url) {
       const uploaded = await uploadProductImage(sb, imagePreview, id);
       if (uploaded) imageUrl = uploaded;
-      else imageUrl = imagePreview; // keep blob url as fallback
+      else imageUrl = imagePreview;
     }
 
+    // Gramaj: boş veya geçersiz ise 0 kaydet
+    const parsedWeight = weightGrams.trim() === "" ? 0 : parseFloat(weightGrams);
+    const finalWeight = isNaN(parsedWeight) || parsedWeight < 0 ? 0 : parsedWeight;
+
+    const productData = {
+      name: name.trim(),
+      description: description.trim() || null,
+      image_url: imageUrl,
+      weight_grams: finalWeight,
+    };
+
+    let dbError: any = null;
+
     if (initial) {
-      await sb.from("products").update({ name: name.trim(), description: description.trim() || null, image_url: imageUrl, weight_grams: parseFloat(weightGrams) || 0 }).eq("id", initial.id);
+      const { error } = await sb.from("products").update(productData).eq("id", initial.id);
+      dbError = error;
     } else {
-      await sb.from("products").insert({ id, name: name.trim(), description: description.trim() || null, image_url: imageUrl, weight_grams: parseFloat(weightGrams) || 0 });
+      const { error } = await sb.from("products").insert({ id, ...productData });
+      dbError = error;
+    }
+
+    if (dbError) {
+      console.error("Ürün kaydetme hatası:", dbError);
+      toast({ title: "Kaydetme hatası", description: dbError.message, variant: "destructive" });
+      setSaving(false);
+      return;
     }
 
     toast({ title: initial ? "Ürün güncellendi ✓" : "Ürün eklendi ✓" });
@@ -355,7 +377,10 @@ export function ProductCatalogClient() {
   const load = useCallback(async () => {
     let sb: ReturnType<typeof createClient>;
     try { sb = createClient(); } catch { setLoading(false); return; }
-    const { data } = await sb.from("products").select("*").order("name");
+    const { data, error } = await sb.from("products").select("*").order("name");
+    if (error) {
+      console.error("Ürünler yüklenirken hata:", error);
+    }
     setProducts(data ?? []);
     setLoading(false);
   }, []);
@@ -373,8 +398,6 @@ export function ProductCatalogClient() {
     setEditing(null);
     setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 50);
   }
-
-  useEffect(() => { load(); }, [load]);
 
   async function del(id: string) {
     const confirmed = await confirm({
