@@ -18,6 +18,22 @@ interface OrderItem {
   unit_price: number;
 }
 
+interface Delivery {
+  id: string;
+  delivery_date: string;
+  items: Array<{
+    id: string;
+    quantity: number;
+    order_item_id: string;
+  }>;
+}
+
+interface Payment {
+  id: string;
+  payment_date: string;
+  amount: number;
+}
+
 interface Order {
   id: string;
   created_at: string;
@@ -32,7 +48,10 @@ interface InvoiceDialogProps {
 
 export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
   const { toast } = useToast();
-  const [mode, setMode] = useState<"all" | "produced" | null>(null);
+  const [mode, setMode] = useState<"all" | "produced" | "after_delivery" | null>(null);
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [loading, setLoading] = useState(true);
   const [invoiceItems, setInvoiceItems] = useState<Array<{
     product_name: string;
     color: string;
@@ -41,6 +60,31 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
     total: number;
   }>>([]);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
+
+  // Teslimatları ve ödemeleri yükle
+  useEffect(() => {
+    async function loadData() {
+      const sb = createClient();
+      
+      const { data: deliveriesData } = await sb
+        .from("deliveries")
+        .select("id, delivery_date, items:delivery_items(id, quantity, order_item_id)")
+        .eq("order_id", order.id)
+        .order("delivery_date", { ascending: false });
+      
+      const { data: paymentsData } = await sb
+        .from("payments")
+        .select("id, payment_date, amount")
+        .eq("order_id", order.id)
+        .order("payment_date", { ascending: false });
+      
+      setDeliveries((deliveriesData as any) || []);
+      setPayments(paymentsData || []);
+      setLoading(false);
+    }
+    
+    loadData();
+  }, [order.id]);
 
   useEffect(() => {
     if (mode === "all") {
@@ -73,8 +117,50 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
         .filter(item => item !== null) as typeof invoiceItems;
       
       setInvoiceItems(items);
+    } else if (mode === "after_delivery") {
+      // Son teslimatdan sonra üretilen ürünler
+      if (deliveries.length === 0) {
+        setInvoiceItems([]);
+        return;
+      }
+      
+      // Son teslimat tarihini bul
+      const lastDelivery = deliveries[0]; // Zaten tarihe göre sıralı (descending)
+      
+      // Son teslimatda teslim edilen miktarları hesapla
+      const deliveredInLastDelivery = new Map<string, number>();
+      lastDelivery.items.forEach(item => {
+        deliveredInLastDelivery.set(item.order_item_id, item.quantity);
+      });
+      
+      // Son teslimatdan sonra üretilen = Toplam üretilen - (Toplam teslim edilen - Son teslimat)
+      const items = order.items
+        .map(item => {
+          const totalProduced = item.produced_quantity || 0;
+          const totalDelivered = item.delivered_quantity || 0;
+          const deliveredInLast = deliveredInLastDelivery.get(item.id) || 0;
+          
+          // Son teslimatdan önceki teslimatlar
+          const deliveredBeforeLast = totalDelivered - deliveredInLast;
+          
+          // Son teslimatdan sonra üretilen
+          const producedAfterLast = totalProduced - totalDelivered;
+          
+          if (producedAfterLast <= 0) return null;
+          
+          return {
+            product_name: item.product_name,
+            color: item.color,
+            quantity: producedAfterLast,
+            unit_price: item.unit_price,
+            total: producedAfterLast * item.unit_price,
+          };
+        })
+        .filter(item => item !== null) as typeof invoiceItems;
+      
+      setInvoiceItems(items);
     }
-  }, [mode, order.items]);
+  }, [mode, order.items, deliveries]);
 
   // QR kod oluştur
   useEffect(() => {
@@ -444,6 +530,45 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
                 Üretilmiş ama henüz teslim edilmemiş ürünler
               </p>
             </button>
+
+            {!loading && deliveries.length > 0 && (
+              <button
+                onClick={() => setMode("after_delivery")}
+                className="w-full p-4 rounded-xl border-2 border-border hover:border-violet-500 hover:bg-violet-500/5 transition-all text-left group"
+              >
+                <p className="font-semibold text-foreground mb-1 group-hover:text-violet-600">
+                  Teslimatdan Sonraki Hepsi
+                  {(() => {
+                    const lastDelivery = deliveries[0];
+                    const deliveredInLast = new Map<string, number>();
+                    lastDelivery.items.forEach(item => {
+                      deliveredInLast.set(item.order_item_id, item.quantity);
+                    });
+                    
+                    let afterDeliveryCount = 0;
+                    let afterDeliveryValue = 0;
+                    
+                    order.items.forEach(item => {
+                      const totalProduced = item.produced_quantity || 0;
+                      const totalDelivered = item.delivered_quantity || 0;
+                      const producedAfterLast = Math.max(0, totalProduced - totalDelivered);
+                      
+                      afterDeliveryCount += producedAfterLast;
+                      afterDeliveryValue += producedAfterLast * (item.unit_price || 0);
+                    });
+                    
+                    return afterDeliveryCount > 0 ? (
+                      <span className="ml-2 text-xs font-bold text-violet-600">
+                        ({afterDeliveryCount} adet · {formatCurrency(afterDeliveryValue)})
+                      </span>
+                    ) : null;
+                  })()}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Son teslimat: {formatDate(deliveries[0].delivery_date)}
+                </p>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -463,7 +588,7 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
             <div>
               <h3 className="font-bold text-foreground">İrsaliye / Fiş</h3>
               <p className="text-xs text-muted-foreground">
-                {mode === "all" ? "Tüm Ürünler" : "Şu Ana Kadar Yapılanlar"}
+                {mode === "all" ? "Tüm Ürünler" : mode === "produced" ? "Şu Ana Kadar Yapılanlar" : "Teslimatdan Sonraki Hepsi"}
               </p>
             </div>
           </div>

@@ -45,36 +45,7 @@ export function EditDeliveryDialog({
   const [notes, setNotes] = useState(delivery.notes || "");
   const [loading, setLoading] = useState(false);
   
-  // Debug: Teslimat verilerini kontrol et
-  useEffect(() => {
-    const debugInfo = {
-      deliveryId: delivery.id,
-      itemsCount: delivery.items?.length || 0,
-      items: delivery.items?.map(item => ({
-        id: item.id,
-        quantity: item.quantity,
-        order_item_id: item.order_item_id,
-        order_item: {
-          product_name: item.order_item?.product_name,
-          color: item.order_item?.color,
-          quantity: item.order_item?.quantity,
-          delivered_quantity: item.order_item?.delivered_quantity,
-        }
-      }))
-    };
-    
-    console.log("🔍 EditDeliveryDialog - Delivery Data:", debugInfo);
-    
-    // Eğer items boşsa veya quantity 0 ise uyarı ver
-    if (!delivery.items || delivery.items.length === 0) {
-      console.error("❌ HATA: delivery.items boş!");
-    } else {
-      const zeroQuantityItems = delivery.items.filter(item => !item.quantity || item.quantity === 0);
-      if (zeroQuantityItems.length > 0) {
-        console.error("❌ HATA: Bazı itemlerin quantity değeri 0:", zeroQuantityItems);
-      }
-    }
-  }, [delivery]);
+
   
   // Mevcut teslimat kalemlerini dönüştür
   const [deliveryItems, setDeliveryItems] = useState<EditDeliveryItemInput[]>(() => {
@@ -101,22 +72,12 @@ export function EditDeliveryDialog({
 
   // delivery prop'u değiştiğinde state'i güncelle
   useEffect(() => {
-    console.log("🔄 Updating deliveryItems from delivery.items:", delivery.items);
-    
     const items = delivery.items.map((item) => {
       const alreadyDelivered = item.order_item.delivered_quantity || 0;
       const currentDeliveryQty = item.quantity || 0;
       const totalOrdered = item.order_item.quantity || 0;
       const otherDeliveries = alreadyDelivered - currentDeliveryQty;
       const remaining = totalOrdered - otherDeliveries;
-      
-      console.log(`  📦 ${item.order_item.product_name} (${item.order_item.color}):`, {
-        currentDeliveryQty,
-        alreadyDelivered,
-        totalOrdered,
-        remaining,
-        rawQuantity: item.quantity
-      });
       
       return {
         id: item.id,
@@ -130,7 +91,6 @@ export function EditDeliveryDialog({
       };
     });
     
-    console.log("✅ Setting deliveryItems state:", items);
     setDeliveryItems(items);
   }, [delivery]);
 
@@ -285,26 +245,15 @@ export function EditDeliveryDialog({
 
   // Hesaplamaları useMemo ile optimize et
   const activeItems = useMemo(() => {
-    const items = deliveryItems.filter(item => !item.isDeleted);
-    console.log("📊 Active Items:", items.map(i => ({ 
-      product: i.product_name, 
-      color: i.color, 
-      quantity: i.quantity,
-      unit_price: i.unit_price 
-    })));
-    return items;
+    return deliveryItems.filter(item => !item.isDeleted);
   }, [deliveryItems]);
 
   const totalDelivering = useMemo(() => {
-    const total = activeItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
-    console.log("📦 Total Delivering:", total);
-    return total;
+    return activeItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
   }, [activeItems]);
 
   const totalValue = useMemo(() => {
-    const total = activeItems.reduce((sum, item) => sum + ((item.quantity || 0) * (item.unit_price || 0)), 0);
-    console.log("💰 Total Value:", total);
-    return total;
+    return activeItems.reduce((sum, item) => sum + ((item.quantity || 0) * (item.unit_price || 0)), 0);
   }, [activeItems]);
 
   // Ürünleri grupla
@@ -356,22 +305,6 @@ export function EditDeliveryDialog({
                 <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">
                   Teslimat Özeti
                 </p>
-              </div>
-              
-              {/* DEBUG: deliveryItems state'ini göster */}
-              <div className="mb-3 p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded text-xs">
-                <p className="font-bold text-yellow-800 dark:text-yellow-200 mb-1">DEBUG INFO:</p>
-                <p className="text-yellow-700 dark:text-yellow-300">
-                  deliveryItems.length: {deliveryItems.length}
-                </p>
-                <p className="text-yellow-700 dark:text-yellow-300">
-                  activeItems.length: {activeItems.length}
-                </p>
-                {deliveryItems.slice(0, 2).map((item, idx) => (
-                  <p key={idx} className="text-yellow-700 dark:text-yellow-300">
-                    Item {idx}: qty={item.quantity}, max={item.max_quantity}, name={item.product_name}
-                  </p>
-                ))}
               </div>
               
               <div className="grid grid-cols-2 gap-4">

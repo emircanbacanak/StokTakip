@@ -336,14 +336,6 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
         .from("deliveries").select(`*, items:delivery_items(*, order_item:order_items(*))`)
         .eq("order_id", order.id).order("delivery_date", { ascending: false });
       
-      console.log("📦 loadDetails - Deliveries Data:", {
-        count: deliveriesData?.length || 0,
-        error: deliveriesError,
-        firstDelivery: deliveriesData?.[0],
-        firstDeliveryItems: deliveriesData?.[0]?.items,
-        rawDataStringified: JSON.stringify(deliveriesData, null, 2)
-      });
-      
       const { data: paymentsData, error: paymentsError } = await sb
         .from("payments").select("*").eq("order_id", order.id).order("payment_date", { ascending: false});
       const { data: orderData } = await sb
@@ -583,6 +575,11 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
                   const displayQty = totalQty > 0 ? totalQty : fallbackQty;
                   const hasNoItems = delivery.items.length === 0;
                   
+                  // Teslimat tutarını hesapla
+                  const totalAmount = delivery.items.reduce((sum, di) => {
+                    return sum + (di.quantity * (di.order_item?.unit_price || 0));
+                  }, 0);
+                  
                   // Ürün bazlı gruplama
                   const productGroups = new Map<string, typeof delivery.items>();
                   delivery.items.forEach((item) => {
@@ -600,31 +597,23 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
                           <Truck className="w-4 h-4 text-blue-600" />
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm font-semibold text-foreground">{displayQty} adet teslim edildi</p>
+                          <p className="text-sm font-semibold text-foreground">
+                            {displayQty} adet teslim edildi
+                            {totalAmount > 0 && (
+                              <span className="ml-2 text-blue-600">· {formatCurrency(totalAmount)}</span>
+                            )}
+                          </p>
                           <p className="text-xs text-muted-foreground">{formatDate(delivery.delivery_date)}</p>
                         </div>
                         <button
                           onClick={() => {
                             // deliveries state'inden ID ile bul
                             const fullDelivery = deliveries.find(d => d.id === delivery.id);
-                            console.log("🔍 Düzenle butonuna tıklandı:", {
-                              deliveryId: delivery.id,
-                              deliveryFromMap: {
-                                id: delivery.id,
-                                items: delivery.items,
-                                itemsLength: delivery.items?.length || 0
-                              },
-                              fullDeliveryFromState: fullDelivery,
-                              fullDeliveryItems: fullDelivery?.items,
-                              fullDeliveryItemsLength: fullDelivery?.items?.length || 0
-                            });
                             
                             // State'den bulunan tam veriyi kullan
                             if (fullDelivery) {
                               setEditingDelivery(fullDelivery);
                               setShowEditDelivery(true);
-                            } else {
-                              console.error("❌ Teslimat bulunamadı!");
                             }
                           }}
                           className="p-2 text-muted-foreground/40 hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"

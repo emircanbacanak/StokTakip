@@ -96,7 +96,7 @@ export function OrdersClient() {
   const [loading, setLoading] = useState(true);
   const [newOpen, setNewOpen] = useState(false);
   const [selected, setSelected] = useState<Order | null>(null);
-  const [activeTab, setActiveTab] = useState<OrderStatus>("pending");
+  const [activeTab, setActiveTab] = useState<OrderStatus | "all">("all");
   const { toast } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
 
@@ -104,7 +104,7 @@ export function OrdersClient() {
     let sb; try { sb = createClient(); } catch { setLoading(false); return; }
     const { data } = await sb
       .from("orders")
-      .select("id, created_at, total_amount, paid_amount, status, notes, buyer:buyers(id,name), items:order_items(id,product_name,color,quantity,produced_quantity,unit_price)")
+      .select("id, created_at, total_amount, paid_amount, status, notes, buyer:buyers(id,name), items:order_items(id,product_name,color,quantity,produced_quantity,delivered_quantity,unit_price)")
       .order("created_at", { ascending: false });
     const list = (data as unknown as Order[]) || [];
     setOrders(list);
@@ -173,7 +173,9 @@ export function OrdersClient() {
   const seen: Record<string, BuyerGroup> = {};
   
   // Tab'a göre filtrele
-  const filteredOrders = orders.filter(o => o.status === activeTab);
+  const filteredOrders = activeTab === "all" 
+    ? orders.filter(o => o.status !== "delivered") // "Tümü" seçeneği: delivered hariç tümü
+    : orders.filter(o => o.status === activeTab);
   
   filteredOrders.forEach((o) => {
     if (!seen[o.buyer.id]) {
@@ -198,10 +200,33 @@ export function OrdersClient() {
     }, 0);
   };
 
+  // Teslim edilecek ürün sayısı - SADECE orijinal sipariş miktarlarına göre (fazla üretim dahil değil)
+  const calculateRemainingToDeliver = (orders: Order[]) => {
+    return orders.reduce((sum, order) => {
+      const orderRemaining = order.items.reduce((itemSum, item) => {
+        // Orijinal sipariş miktarı - teslim edilen miktar
+        const deliveredQty = item.delivered_quantity || 0;
+        const remaining = Math.max(0, item.quantity - deliveredQty);
+        return itemSum + remaining;
+      }, 0);
+      return sum + orderRemaining;
+    }, 0);
+  };
+
   return (
     <div className="space-y-4">
       {/* Tabs */}
       <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+        <button
+          onClick={() => setActiveTab("all")}
+          className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all ${
+            activeTab === "all"
+              ? "bg-gradient-to-r from-blue-500 to-violet-600 text-white shadow-lg shadow-blue-500/25"
+              : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-blue-500/30"
+          }`}
+        >
+          Tümü
+        </button>
         <button
           onClick={() => setActiveTab("pending")}
           className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all ${
@@ -273,6 +298,7 @@ export function OrdersClient() {
         <div className="space-y-3">
           {groups.map((g) => {
             const totalDebt = calculateTotalDebt(g.orders);
+            const remainingToDeliver = calculateRemainingToDeliver(g.orders);
 
             return (
               <button
@@ -286,7 +312,11 @@ export function OrdersClient() {
                   </div>
                   <div className="text-left">
                     <p className="text-base font-bold text-foreground">{g.buyer_name}</p>
-                    <p className="text-sm text-muted-foreground">{g.orders.length} sipariş{totalDebt > 0 && <span className="text-red-500 ml-2">· {formatCurrency(totalDebt)} borç</span>}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {g.orders.length} sipariş
+                      {remainingToDeliver > 0 && <span className="text-amber-600 ml-2">· {remainingToDeliver} adet teslim edilecek</span>}
+                      {totalDebt > 0 && <span className="text-red-500 ml-2">· {formatCurrency(totalDebt)} borç</span>}
+                    </p>
                   </div>
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors shrink-0" />
