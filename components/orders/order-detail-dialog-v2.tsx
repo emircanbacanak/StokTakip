@@ -335,8 +335,17 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
       const { data: deliveriesData, error: deliveriesError } = await sb
         .from("deliveries").select(`*, items:delivery_items(*, order_item:order_items(*))`)
         .eq("order_id", order.id).order("delivery_date", { ascending: false });
+      
+      console.log("📦 loadDetails - Deliveries Data:", {
+        count: deliveriesData?.length || 0,
+        error: deliveriesError,
+        firstDelivery: deliveriesData?.[0],
+        firstDeliveryItems: deliveriesData?.[0]?.items,
+        rawDataStringified: JSON.stringify(deliveriesData, null, 2)
+      });
+      
       const { data: paymentsData, error: paymentsError } = await sb
-        .from("payments").select("*").eq("order_id", order.id).order("payment_date", { ascending: false });
+        .from("payments").select("*").eq("order_id", order.id).order("payment_date", { ascending: false});
       const { data: orderData } = await sb
         .from("orders").select("*, buyer:buyers(*), items:order_items(*)").eq("id", order.id).single();
       if (orderData) setOrder(orderData as any);
@@ -596,8 +605,27 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
                         </div>
                         <button
                           onClick={() => {
-                            setEditingDelivery(delivery);
-                            setShowEditDelivery(true);
+                            // deliveries state'inden ID ile bul
+                            const fullDelivery = deliveries.find(d => d.id === delivery.id);
+                            console.log("🔍 Düzenle butonuna tıklandı:", {
+                              deliveryId: delivery.id,
+                              deliveryFromMap: {
+                                id: delivery.id,
+                                items: delivery.items,
+                                itemsLength: delivery.items?.length || 0
+                              },
+                              fullDeliveryFromState: fullDelivery,
+                              fullDeliveryItems: fullDelivery?.items,
+                              fullDeliveryItemsLength: fullDelivery?.items?.length || 0
+                            });
+                            
+                            // State'den bulunan tam veriyi kullan
+                            if (fullDelivery) {
+                              setEditingDelivery(fullDelivery);
+                              setShowEditDelivery(true);
+                            } else {
+                              console.error("❌ Teslimat bulunamadı!");
+                            }
                           }}
                           className="p-2 text-muted-foreground/40 hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"
                           title="Düzenle"

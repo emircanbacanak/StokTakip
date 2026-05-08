@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { X, Truck, Save, Trash2, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/utils";
@@ -45,28 +45,94 @@ export function EditDeliveryDialog({
   const [notes, setNotes] = useState(delivery.notes || "");
   const [loading, setLoading] = useState(false);
   
+  // Debug: Teslimat verilerini kontrol et
+  useEffect(() => {
+    const debugInfo = {
+      deliveryId: delivery.id,
+      itemsCount: delivery.items?.length || 0,
+      items: delivery.items?.map(item => ({
+        id: item.id,
+        quantity: item.quantity,
+        order_item_id: item.order_item_id,
+        order_item: {
+          product_name: item.order_item?.product_name,
+          color: item.order_item?.color,
+          quantity: item.order_item?.quantity,
+          delivered_quantity: item.order_item?.delivered_quantity,
+        }
+      }))
+    };
+    
+    console.log("🔍 EditDeliveryDialog - Delivery Data:", debugInfo);
+    
+    // Eğer items boşsa veya quantity 0 ise uyarı ver
+    if (!delivery.items || delivery.items.length === 0) {
+      console.error("❌ HATA: delivery.items boş!");
+    } else {
+      const zeroQuantityItems = delivery.items.filter(item => !item.quantity || item.quantity === 0);
+      if (zeroQuantityItems.length > 0) {
+        console.error("❌ HATA: Bazı itemlerin quantity değeri 0:", zeroQuantityItems);
+      }
+    }
+  }, [delivery]);
+  
   // Mevcut teslimat kalemlerini dönüştür
   const [deliveryItems, setDeliveryItems] = useState<EditDeliveryItemInput[]>(() => {
     return delivery.items.map((item) => {
       // Bu teslimat içindeki miktar + henüz teslim edilmemiş miktar = max
       const alreadyDelivered = item.order_item.delivered_quantity || 0;
-      const currentDeliveryQty = item.quantity; // Bu teslimat içindeki miktar
-      const totalOrdered = item.order_item.quantity;
+      const currentDeliveryQty = item.quantity || 0; // Bu teslimat içindeki miktar
+      const totalOrdered = item.order_item.quantity || 0;
       const otherDeliveries = alreadyDelivered - currentDeliveryQty; // Diğer teslimatlar
       const remaining = totalOrdered - otherDeliveries; // Bu teslimat için max
       
       return {
         id: item.id,
         order_item_id: item.order_item_id,
-        quantity: item.quantity,
-        max_quantity: remaining, // Sipariş miktarı - diğer teslimatlar
+        quantity: currentDeliveryQty, // Null/undefined kontrolü ile
+        max_quantity: Math.max(0, remaining), // Negatif değer olmasın
         product_name: item.order_item.product_name,
         color: item.order_item.color,
-        unit_price: item.order_item.unit_price,
+        unit_price: item.order_item.unit_price || 0,
         isDeleted: false,
       };
     });
   });
+
+  // delivery prop'u değiştiğinde state'i güncelle
+  useEffect(() => {
+    console.log("🔄 Updating deliveryItems from delivery.items:", delivery.items);
+    
+    const items = delivery.items.map((item) => {
+      const alreadyDelivered = item.order_item.delivered_quantity || 0;
+      const currentDeliveryQty = item.quantity || 0;
+      const totalOrdered = item.order_item.quantity || 0;
+      const otherDeliveries = alreadyDelivered - currentDeliveryQty;
+      const remaining = totalOrdered - otherDeliveries;
+      
+      console.log(`  📦 ${item.order_item.product_name} (${item.order_item.color}):`, {
+        currentDeliveryQty,
+        alreadyDelivered,
+        totalOrdered,
+        remaining,
+        rawQuantity: item.quantity
+      });
+      
+      return {
+        id: item.id,
+        order_item_id: item.order_item_id,
+        quantity: currentDeliveryQty,
+        max_quantity: Math.max(0, remaining),
+        product_name: item.order_item.product_name,
+        color: item.order_item.color,
+        unit_price: item.order_item.unit_price || 0,
+        isDeleted: false,
+      };
+    });
+    
+    console.log("✅ Setting deliveryItems state:", items);
+    setDeliveryItems(items);
+  }, [delivery]);
 
   // Eklenebilecek yeni ürünler (henüz bu teslimat içinde olmayan)
   const [availableItems, setAvailableItems] = useState<EditDeliveryItemInput[]>([]);
@@ -217,18 +283,41 @@ export function EditDeliveryDialog({
     }
   };
 
-  const activeItems = deliveryItems.filter(item => !item.isDeleted);
-  const totalDelivering = activeItems.reduce((sum, item) => sum + item.quantity, 0);
-  const totalValue = activeItems.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+  // Hesaplamaları useMemo ile optimize et
+  const activeItems = useMemo(() => {
+    const items = deliveryItems.filter(item => !item.isDeleted);
+    console.log("📊 Active Items:", items.map(i => ({ 
+      product: i.product_name, 
+      color: i.color, 
+      quantity: i.quantity,
+      unit_price: i.unit_price 
+    })));
+    return items;
+  }, [deliveryItems]);
+
+  const totalDelivering = useMemo(() => {
+    const total = activeItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
+    console.log("📦 Total Delivering:", total);
+    return total;
+  }, [activeItems]);
+
+  const totalValue = useMemo(() => {
+    const total = activeItems.reduce((sum, item) => sum + ((item.quantity || 0) * (item.unit_price || 0)), 0);
+    console.log("💰 Total Value:", total);
+    return total;
+  }, [activeItems]);
 
   // Ürünleri grupla
-  const groupedItems = new Map<string, EditDeliveryItemInput[]>();
-  activeItems.forEach((item) => {
-    if (!groupedItems.has(item.product_name)) {
-      groupedItems.set(item.product_name, []);
-    }
-    groupedItems.get(item.product_name)!.push(item);
-  });
+  const groupedItems = useMemo(() => {
+    const map = new Map<string, EditDeliveryItemInput[]>();
+    activeItems.forEach((item) => {
+      if (!map.has(item.product_name)) {
+        map.set(item.product_name, []);
+      }
+      map.get(item.product_name)!.push(item);
+    });
+    return map;
+  }, [activeItems]);
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -268,6 +357,23 @@ export function EditDeliveryDialog({
                   Teslimat Özeti
                 </p>
               </div>
+              
+              {/* DEBUG: deliveryItems state'ini göster */}
+              <div className="mb-3 p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded text-xs">
+                <p className="font-bold text-yellow-800 dark:text-yellow-200 mb-1">DEBUG INFO:</p>
+                <p className="text-yellow-700 dark:text-yellow-300">
+                  deliveryItems.length: {deliveryItems.length}
+                </p>
+                <p className="text-yellow-700 dark:text-yellow-300">
+                  activeItems.length: {activeItems.length}
+                </p>
+                {deliveryItems.slice(0, 2).map((item, idx) => (
+                  <p key={idx} className="text-yellow-700 dark:text-yellow-300">
+                    Item {idx}: qty={item.quantity}, max={item.max_quantity}, name={item.product_name}
+                  </p>
+                ))}
+              </div>
+              
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Toplam Adet</p>
