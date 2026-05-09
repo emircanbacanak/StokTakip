@@ -567,12 +567,9 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
                     <p className="text-sm text-muted-foreground">Henüz teslimat yapılmadı</p>
                   </div>
                 ) : deliveries.map((delivery) => {
+                  // Her teslimat sadece kendi delivery_items kayıtlarını göstermeli
                   const totalQty = delivery.items.reduce((sum, di) => sum + di.quantity, 0);
-                  // delivery_items boşsa order_items.delivered_quantity toplamını fallback olarak kullan
-                  const fallbackQty = totalQty === 0
-                    ? order.items.reduce((sum, oi) => sum + (oi.delivered_quantity || 0), 0)
-                    : 0;
-                  const displayQty = totalQty > 0 ? totalQty : fallbackQty;
+                  const displayQty = totalQty;
                   const hasNoItems = delivery.items.length === 0;
                   
                   // Teslimat tutarını hesapla
@@ -631,39 +628,12 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
                       </div>
                       
                       {/* Ürün grupları */}
-                      {hasNoItems && fallbackQty > 0 ? (
-                        // delivery_items boş ama delivered_quantity var → order_items'dan göster
-                        <div className="divide-y divide-border">
-                          {order.items
-                            .filter((oi) => (oi.delivered_quantity || 0) > 0)
-                            .reduce((groups, oi) => {
-                              const existing = groups.find((g) => g.productName === oi.product_name);
-                              if (existing) { existing.items.push(oi); }
-                              else { groups.push({ productName: oi.product_name, items: [oi] }); }
-                              return groups;
-                            }, [] as { productName: string; items: OrderItem[] }[])
-                            .map(({ productName, items: productItems }) => {
-                              const productTotal = productItems.reduce((sum, i) => sum + (i.delivered_quantity || 0), 0);
-                              return (
-                                <div key={productName} className="px-4 py-3">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <p className="text-sm font-semibold text-foreground">{productName}</p>
-                                    <span className="text-xs font-bold text-muted-foreground">{productTotal} adet</span>
-                                  </div>
-                                  <div className="space-y-1.5 pl-2">
-                                    {productItems.map((oi) => (
-                                      <div key={oi.id} className="flex items-center justify-between text-xs">
-                                        <div className="flex items-center gap-2">
-                                          <ColorBadge color={oi.color} size="sm" />
-                                          <span className="text-muted-foreground">{oi.color}</span>
-                                        </div>
-                                        <span className="font-semibold text-foreground">{oi.delivered_quantity} adet</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              );
-                            })}
+                      {hasNoItems ? (
+                        // delivery_items boş - bu teslimat için veri yok
+                        <div className="px-4 py-6 text-center">
+                          <AlertCircle className="w-8 h-8 text-amber-500 mx-auto mb-2" />
+                          <p className="text-sm text-muted-foreground">Bu teslimat için ürün kaydı bulunamadı</p>
+                          <p className="text-xs text-muted-foreground mt-1">Teslimatı düzenleyerek ürün ekleyebilirsiniz</p>
                         </div>
                       ) : (
                         <div className="divide-y divide-border">
@@ -794,7 +764,14 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
           onSuccess={() => { setShowEditOrder(false); loadDetails(); onStatusChange(); }} />
       )}
       {showInvoice && (
-        <InvoiceDialog order={order} onClose={() => setShowInvoice(false)} />
+        <InvoiceDialog 
+          order={order} 
+          onClose={() => setShowInvoice(false)} 
+          onSuccess={() => {
+            loadDetails();
+            onStatusChange();
+          }}
+        />
       )}
       {showFilamentDialog && (
         <FilamentInputDialog

@@ -44,11 +44,12 @@ interface Order {
 interface InvoiceDialogProps {
   order: Order;
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
-export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
+export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps) {
   const { toast } = useToast();
-  const [mode, setMode] = useState<"all" | "produced" | "after_delivery" | null>(null);
+  const [mode, setMode] = useState<"all" | "produced" | "after_delivery" | "custom" | null>(null);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +61,10 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
     total: number;
   }>>([]);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
+  
+  // Elle oluştur modu için seçili ürünler
+  const [customItems, setCustomItems] = useState<Map<string, number>>(new Map());
+  const [creatingDelivery, setCreatingDelivery] = useState(false);
 
   // Teslimatları ve ödemeleri yükle
   useEffect(() => {
@@ -118,42 +123,56 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
       
       setInvoiceItems(items);
     } else if (mode === "after_delivery") {
-      // Son teslimatdan sonra üretilen ürünler
+      // DOĞRU HESAPLAMA: Kalan sipariş + Fazla üretimler
       if (deliveries.length === 0) {
         setInvoiceItems([]);
         return;
       }
       
-      // Son teslimat tarihini bul
-      const lastDelivery = deliveries[0]; // Zaten tarihe göre sıralı (descending)
-      
-      // Son teslimatda teslim edilen miktarları hesapla
-      const deliveredInLastDelivery = new Map<string, number>();
-      lastDelivery.items.forEach(item => {
-        deliveredInLastDelivery.set(item.order_item_id, item.quantity);
-      });
-      
-      // Son teslimatdan sonra üretilen = Toplam üretilen - (Toplam teslim edilen - Son teslimat)
       const items = order.items
         .map(item => {
-          const totalProduced = item.produced_quantity || 0;
-          const totalDelivered = item.delivered_quantity || 0;
-          const deliveredInLast = deliveredInLastDelivery.get(item.id) || 0;
+          const orderedQty = item.quantity;           // Sipariş: 12
+          const deliveredQty = item.delivered_quantity || 0; // Teslim: 5
+          const producedQty = item.produced_quantity || 0;   // Üretilen: 18
           
-          // Son teslimatdan önceki teslimatlar
-          const deliveredBeforeLast = totalDelivered - deliveredInLast;
+          // Kalan sipariş (base)
+          const remainingOrder = Math.max(0, orderedQty - deliveredQty); // 12 - 5 = 7
           
-          // Son teslimatdan sonra üretilen
-          const producedAfterLast = totalProduced - totalDelivered;
+          // Fazla üretim (sadece henüz teslim edilmemiş)
+          const overProduction = Math.max(0, producedQty - orderedQty); // 18 - 12 = 6
           
-          if (producedAfterLast <= 0) return null;
+          // Toplam teslim edilebilir = Kalan sipariş + Fazla üretim
+          const totalAvailable = remainingOrder + overProduction; // 7 + 6 = 13
+          
+          if (totalAvailable <= 0) return null;
           
           return {
             product_name: item.product_name,
             color: item.color,
-            quantity: producedAfterLast,
+            quantity: totalAvailable,
             unit_price: item.unit_price,
-            total: producedAfterLast * item.unit_price,
+            total: totalAvailable * item.unit_price,
+            // Ekstra bilgi (gösterim için)
+            _remainingOrder: remainingOrder,
+            _overProduction: overProduction,
+          };
+        })
+        .filter(item => item !== null) as typeof invoiceItems;
+      
+      setInvoiceItems(items);
+    } else if (mode === "custom") {
+      // Elle oluştur modu - seçili ürünler
+      const items = Array.from(customItems.entries())
+        .map(([itemId, quantity]) => {
+          const item = order.items.find(i => i.id === itemId);
+          if (!item || quantity <= 0) return null;
+          
+          return {
+            product_name: item.product_name,
+            color: item.color,
+            quantity: quantity,
+            unit_price: item.unit_price,
+            total: quantity * item.unit_price,
           };
         })
         .filter(item => item !== null) as typeof invoiceItems;
@@ -185,6 +204,96 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
 
   const totalAmount = invoiceItems.reduce((sum, item) => sum + item.total, 0);
   const totalQuantity = invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  // Elle oluştur modu için fonksiyonlar
+  const updateCustomQuantity = (itemId: string, quantity: number) => {
+    setCustomItems(prev => {
+      const newMap = new Map(prev);
+      if (quantity <= 0) {
+        newMap.delete(itemId);
+      } else {
+        newMap.set(itemId, quantity);
+      }
+      return newMap;
+    });
+  };
+
+  const handleCreateCustomInvoice = async () => {
+    if (customItems.size === 0) {
+      toast({ title: "En az bir ürün seçmelisiniz", variant: "destructive" });
+      return;
+    }
+
+    setCreatingDelivery(true);
+    try {
+      const sb = createClient();
+
+      // Teslimat oluştur
+      const { data: delivery, error: deliveryError } = await sb
+        .from("deliveries")
+        .insert({
+          order_id: order.id,
+          notes: "Elle oluşturulan fiş",
+        })
+        .select()
+        .single();
+
+      if (deliveryError) throw deliveryError;
+
+      // Teslimat kalemlerini ekle
+      const deliveryItemsData = Array.from(customItems.entries()).map(([itemId, quantity]) => ({
+        delivery_id: delivery.id,
+        order_item_id: itemId,
+        quantity: quantity,
+      }));
+
+      const { error: itemsError } = await sb
+        .from("delivery_items")
+        .insert(deliveryItemsData);
+
+      if (itemsError) {
+        // Hata olursa teslimatı sil
+        await sb.from("deliveries").delete().eq("id", delivery.id);
+        throw itemsError;
+      }
+
+      toast({ title: "Teslimat kaydedildi ve fiş oluşturuldu ✓" });
+      
+      // invoiceItems'ı güncelle ve yazdırma moduna geç
+      const items = Array.from(customItems.entries())
+        .map(([itemId, quantity]) => {
+          const item = order.items.find(i => i.id === itemId);
+          if (!item) return null;
+          
+          return {
+            product_name: item.product_name,
+            color: item.color,
+            quantity: quantity,
+            unit_price: item.unit_price,
+            total: quantity * item.unit_price,
+          };
+        })
+        .filter(item => item !== null) as typeof invoiceItems;
+      
+      setInvoiceItems(items);
+      // mode zaten "custom" olduğu için yazdırma ekranı gösterilecek
+      
+      // Sipariş detaylarını yenile
+      if (onSuccess) {
+        onSuccess();
+      }
+      
+    } catch (error: any) {
+      console.error("Delivery error:", error);
+      toast({
+        title: "Hata oluştu",
+        description: error?.message || "Teslimat kaydedilemedi",
+        variant: "destructive"
+      });
+    } finally {
+      setCreatingDelivery(false);
+    }
+  };
 
   // Ürün bazlı gruplama
   const groupedItems = invoiceItems.reduce((acc, item) => {
@@ -539,36 +648,237 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
                 <p className="font-semibold text-foreground mb-1 group-hover:text-violet-600">
                   Teslimatdan Sonraki Hepsi
                   {(() => {
-                    const lastDelivery = deliveries[0];
-                    const deliveredInLast = new Map<string, number>();
-                    lastDelivery.items.forEach(item => {
-                      deliveredInLast.set(item.order_item_id, item.quantity);
-                    });
-                    
-                    let afterDeliveryCount = 0;
-                    let afterDeliveryValue = 0;
+                    // DOĞRU HESAPLAMA
+                    let totalAvailable = 0;
+                    let totalValue = 0;
+                    let remainingOrderQty = 0;
+                    let overProductionQty = 0;
                     
                     order.items.forEach(item => {
-                      const totalProduced = item.produced_quantity || 0;
-                      const totalDelivered = item.delivered_quantity || 0;
-                      const producedAfterLast = Math.max(0, totalProduced - totalDelivered);
+                      const orderedQty = item.quantity;
+                      const deliveredQty = item.delivered_quantity || 0;
+                      const producedQty = item.produced_quantity || 0;
                       
-                      afterDeliveryCount += producedAfterLast;
-                      afterDeliveryValue += producedAfterLast * (item.unit_price || 0);
+                      const remainingOrder = Math.max(0, orderedQty - deliveredQty);
+                      const overProduction = Math.max(0, producedQty - orderedQty);
+                      const available = remainingOrder + overProduction;
+                      
+                      totalAvailable += available;
+                      totalValue += available * item.unit_price;
+                      remainingOrderQty += remainingOrder;
+                      overProductionQty += overProduction;
                     });
                     
-                    return afterDeliveryCount > 0 ? (
+                    return totalAvailable > 0 ? (
                       <span className="ml-2 text-xs font-bold text-violet-600">
-                        ({afterDeliveryCount} adet · {formatCurrency(afterDeliveryValue)})
+                        ({totalAvailable} adet · {formatCurrency(totalValue)})
                       </span>
                     ) : null;
                   })()}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Son teslimat: {formatDate(deliveries[0].delivery_date)}
+                  Kalan sipariş + Fazla üretimler
                 </p>
               </button>
             )}
+            
+            {!loading && deliveries.length > 0 && (
+              <button
+                onClick={() => setMode("custom")}
+                className="w-full p-4 rounded-xl border-2 border-border hover:border-amber-500 hover:bg-amber-500/5 transition-all text-left group"
+              >
+                <p className="font-semibold text-foreground mb-1 group-hover:text-amber-600">
+                  Elle Oluştur
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Ürün ve adet seçerek özel fiş oluştur
+                </p>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Elle Oluştur - Ürün Seçim Ekranı
+  if (mode === "custom" && invoiceItems.length === 0) {
+    // Teslimatdan sonraki ürünleri hesapla
+    const availableItems = order.items
+      .map(item => {
+        const orderedQty = item.quantity;
+        const deliveredQty = item.delivered_quantity || 0;
+        const producedQty = item.produced_quantity || 0;
+        
+        const remainingOrder = Math.max(0, orderedQty - deliveredQty);
+        const overProduction = Math.max(0, producedQty - orderedQty);
+        const totalAvailable = remainingOrder + overProduction;
+        
+        return {
+          ...item,
+          remainingOrder,
+          overProduction,
+          totalAvailable,
+        };
+      })
+      .filter(item => item.totalAvailable > 0);
+    
+    // Ürün bazlı gruplama
+    const groupedAvailable = availableItems.reduce((acc, item) => {
+      if (!acc[item.product_name]) {
+        acc[item.product_name] = [];
+      }
+      acc[item.product_name].push(item);
+      return acc;
+    }, {} as Record<string, typeof availableItems>);
+    
+    const selectedTotal = Array.from(customItems.values()).reduce((sum, qty) => sum + qty, 0);
+    const selectedValue = Array.from(customItems.entries()).reduce((sum, [itemId, qty]) => {
+      const item = order.items.find(i => i.id === itemId);
+      return sum + (item ? qty * item.unit_price : 0);
+    }, 0);
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+        <div className="relative bg-card rounded-2xl border border-border shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+          {/* Header */}
+          <div className="px-6 py-4 border-b border-border">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                  <FileText className="w-5 h-5 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-foreground">Elle Fiş Oluştur</h3>
+                  <p className="text-xs text-muted-foreground">{order.buyer.name}</p>
+                </div>
+              </div>
+              <button onClick={onClose} className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-all">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            
+            {/* Özet */}
+            <div className="bg-amber-500/5 rounded-xl p-3 border border-amber-500/20">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">Seçili Adet</p>
+                  <p className="text-lg font-bold text-foreground">{selectedTotal}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Toplam Değer</p>
+                  <p className="text-lg font-bold text-foreground">{formatCurrency(selectedValue)}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Ürün Listesi */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+              Teslimatdan Sonraki Ürünler
+            </p>
+            
+            {Object.entries(groupedAvailable).map(([productName, items]) => {
+              const productTotal = items.reduce((sum, i) => sum + i.totalAvailable, 0);
+              
+              return (
+                <div key={productName} className="rounded-xl border border-border bg-card overflow-hidden">
+                  <div className="bg-muted/30 px-4 py-3 border-b border-border">
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold text-sm text-foreground">{productName}</p>
+                      <span className="text-xs font-bold text-muted-foreground">{productTotal} adet mevcut</span>
+                    </div>
+                  </div>
+                  
+                  <div className="p-3 space-y-2">
+                    {items.map(item => {
+                      const currentQty = customItems.get(item.id) || 0;
+                      
+                      return (
+                        <div key={item.id} className="bg-muted/20 rounded-lg p-3 border border-border">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <ColorBadge color={item.color} />
+                              <div>
+                                <p className="text-xs text-muted-foreground">
+                                  {item.remainingOrder} sipariş
+                                  {item.overProduction > 0 && (
+                                    <span className="text-amber-600"> + {item.overProduction} fazla</span>
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+                            <span className="text-xs text-muted-foreground">{formatCurrency(item.unit_price)}/adet</span>
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => updateCustomQuantity(item.id, currentQty - 1)}
+                              disabled={currentQty <= 0}
+                              className="w-8 h-8 rounded-lg border border-border bg-background hover:bg-muted transition-colors flex items-center justify-center font-bold text-foreground disabled:opacity-30"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min={0}
+                              max={item.totalAvailable}
+                              value={currentQty}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 0;
+                                updateCustomQuantity(item.id, Math.min(val, item.totalAvailable));
+                              }}
+                              className="flex-1 h-8 px-2 rounded-lg border border-border bg-background text-center font-semibold text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => updateCustomQuantity(item.id, currentQty + 1)}
+                              disabled={currentQty >= item.totalAvailable}
+                              className="w-8 h-8 rounded-lg border border-border bg-background hover:bg-muted transition-colors flex items-center justify-center font-bold text-foreground disabled:opacity-30"
+                            >
+                              +
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => updateCustomQuantity(item.id, item.totalAvailable)}
+                              className="px-3 h-8 rounded-lg border border-border bg-background hover:bg-muted transition-colors text-xs font-semibold text-foreground"
+                            >
+                              Tümü
+                            </button>
+                          </div>
+                          
+                          {currentQty > 0 && (
+                            <p className="text-xs text-emerald-600 mt-2">
+                              Değer: {formatCurrency(currentQty * item.unit_price)}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Footer */}
+          <div className="px-6 py-4 border-t border-border space-y-2">
+            <button
+              onClick={handleCreateCustomInvoice}
+              disabled={creatingDelivery || selectedTotal === 0}
+              className="w-full bg-gradient-to-r from-amber-500 to-orange-600 text-white font-semibold py-3 rounded-xl shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              {creatingDelivery ? "Oluşturuluyor..." : "Fiş Oluştur ve Teslim Et"}
+            </button>
+            <button
+              onClick={() => setMode(null)}
+              className="w-full border border-border text-foreground font-semibold py-3 rounded-xl text-sm hover:bg-muted transition-all"
+            >
+              Geri
+            </button>
           </div>
         </div>
       </div>
@@ -588,7 +898,7 @@ export function InvoiceDialog({ order, onClose }: InvoiceDialogProps) {
             <div>
               <h3 className="font-bold text-foreground">İrsaliye / Fiş</h3>
               <p className="text-xs text-muted-foreground">
-                {mode === "all" ? "Tüm Ürünler" : mode === "produced" ? "Şu Ana Kadar Yapılanlar" : "Teslimatdan Sonraki Hepsi"}
+                {mode === "all" ? "Tüm Ürünler" : mode === "produced" ? "Şu Ana Kadar Yapılanlar" : mode === "after_delivery" ? "Teslimatdan Sonraki Hepsi" : "Elle Oluşturuldu"}
               </p>
             </div>
           </div>
