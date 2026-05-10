@@ -162,6 +162,23 @@ export function EditOrderDialog({
     if (items.some((i) => !i.product_name)) { toast({ title: "Ürün adlarını doldurun", variant: "destructive" }); return; }
     if (items.some((i) => i.colors.some((c) => !c.color))) { toast({ title: "Renkleri seçin", variant: "destructive" }); return; }
 
+    // DUPLICATE KONTROLÜ: Aynı ürün/renk kombinasyonu var mı?
+    const combinations = new Set<string>();
+    for (const item of items) {
+      for (const color of item.colors) {
+        const key = `${item.product_name}__${color.color}`;
+        if (combinations.has(key)) {
+          toast({ 
+            title: "Duplicate ürün tespit edildi", 
+            description: `${item.product_name} - ${color.color} birden fazla kez eklenmiş`,
+            variant: "destructive" 
+          });
+          return;
+        }
+        combinations.add(key);
+      }
+    }
+
     setSaving(true);
     const sb = createClient();
 
