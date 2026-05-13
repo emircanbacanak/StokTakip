@@ -128,7 +128,7 @@ export function EditDeliveryDialog({
     setDeliveryItems((prev) =>
       prev.map((item) =>
         item.order_item_id === itemId
-          ? { ...item, quantity: Math.max(0, Math.min(quantity, item.max_quantity)) }
+          ? { ...item, quantity: Math.max(0, quantity) } // Max sınırlaması kaldırıldı
           : item
       )
     );
@@ -360,9 +360,6 @@ export function EditDeliveryDialog({
                             <div className="flex items-center justify-between mb-3">
                               <div className="flex items-center gap-2">
                                 <ColorBadge color={item.color} />
-                                <span className="text-xs text-muted-foreground">
-                                  Max: {item.max_quantity} adet
-                                </span>
                               </div>
                               <button
                                 type="button"
@@ -405,17 +402,9 @@ export function EditDeliveryDialog({
                                   <button
                                     type="button"
                                     onClick={() => updateQuantity(item.order_item_id, item.quantity + 1)}
-                                    disabled={item.quantity >= item.max_quantity}
-                                    className="w-9 h-9 rounded-lg border border-border bg-background hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center justify-center font-bold text-foreground"
+                                    className="w-9 h-9 rounded-lg border border-border bg-background hover:bg-muted transition-all flex items-center justify-center font-bold text-foreground"
                                   >
                                     +
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => updateQuantity(item.order_item_id, item.max_quantity)}
-                                    className="px-3 h-9 rounded-lg border border-border bg-background hover:bg-muted transition-all text-xs font-bold text-foreground"
-                                  >
-                                    Max
                                   </button>
                                 </div>
 
