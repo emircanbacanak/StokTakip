@@ -71,9 +71,16 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
     async function loadData() {
       const sb = createClient();
       
+      // Debug: Order items sayısını logla
+      console.log('📦 InvoiceDialog - Order items:', order.items.length);
+      const totalProduced = order.items.reduce((s, i) => 
+        s + ((i.produced_quantity || 0) - (i.delivered_quantity || 0)), 0
+      );
+      console.log('📦 Total produced - delivered:', totalProduced);
+      
       const { data: deliveriesData } = await sb
         .from("deliveries")
-        .select("id, delivery_date, items:delivery_items(id, quantity, order_item_id)")
+        .select("id, delivery_date, items:delivery_items(id, quantity, order_item_id, produced_quantity_at_delivery)")
         .eq("order_id", order.id)
         .order("delivery_date", { ascending: false });
       
@@ -93,14 +100,19 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
 
   useEffect(() => {
     if (mode === "all") {
-      // Tüm sipariş ürünleri
-      const items = order.items.map(item => ({
-        product_name: item.product_name,
-        color: item.color,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        total: item.quantity * item.unit_price,
-      }));
+      // Tüm üretilen ürünler (sipariş + fazla üretim)
+      const items = order.items.map(item => {
+        const producedQty = item.produced_quantity || 0;
+        
+        return {
+          product_name: item.product_name,
+          color: item.color,
+          quantity: producedQty, // Üretilen miktar (sipariş + fazlalık)
+          unit_price: item.unit_price,
+          total: producedQty * item.unit_price,
+        };
+      }).filter(item => item.quantity > 0); // Sadece üretilmiş olanlar
+      
       setInvoiceItems(items);
     } else if (mode === "produced") {
       // Üretilmiş ama henüz teslim edilmemiş ürünler
@@ -123,7 +135,7 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
       
       setInvoiceItems(items);
     } else if (mode === "after_delivery") {
-      // DOĞRU HESAPLAMA: Kalan sipariş + Fazla üretimler
+      // Teslimatdan sonra üretilen + fazlalık
       if (deliveries.length === 0) {
         setInvoiceItems([]);
         return;
@@ -131,30 +143,29 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
       
       const items = order.items
         .map(item => {
-          const orderedQty = item.quantity;           // Sipariş: 12
-          const deliveredQty = item.delivered_quantity || 0; // Teslim: 5
-          const producedQty = item.produced_quantity || 0;   // Üretilen: 18
+          const producedQty = item.produced_quantity || 0;
           
-          // Kalan sipariş (base)
-          const remainingOrder = Math.max(0, orderedQty - deliveredQty); // 12 - 5 = 7
+          // Son teslimat anındaki üretim miktarını bul
+          let lastProducedAtDelivery = 0;
+          deliveries.forEach(delivery => {
+            delivery.items.forEach((di: any) => {
+              if (di.order_item_id === item.id) {
+                lastProducedAtDelivery = Math.max(lastProducedAtDelivery, di.produced_quantity_at_delivery || 0);
+              }
+            });
+          });
           
-          // Fazla üretim (sadece henüz teslim edilmemiş)
-          const overProduction = Math.max(0, producedQty - orderedQty); // 18 - 12 = 6
+          // Teslimatdan sonra üretilen = Şu anki üretim - Son teslimat anındaki üretim
+          const producedAfterDelivery = Math.max(0, producedQty - lastProducedAtDelivery);
           
-          // Toplam teslim edilebilir = Kalan sipariş + Fazla üretim
-          const totalAvailable = remainingOrder + overProduction; // 7 + 6 = 13
-          
-          if (totalAvailable <= 0) return null;
+          if (producedAfterDelivery <= 0) return null;
           
           return {
             product_name: item.product_name,
             color: item.color,
-            quantity: totalAvailable,
+            quantity: producedAfterDelivery,
             unit_price: item.unit_price,
-            total: totalAvailable * item.unit_price,
-            // Ekstra bilgi (gösterim için)
-            _remainingOrder: remainingOrder,
-            _overProduction: overProduction,
+            total: producedAfterDelivery * item.unit_price,
           };
         })
         .filter(item => item !== null) as typeof invoiceItems;
@@ -619,7 +630,7 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
             >
               <p className="font-semibold text-foreground mb-1 group-hover:text-blue-600">Tüm Ürünler</p>
               <p className="text-xs text-muted-foreground">
-                Siparişin tamamı ({order.items.reduce((s, i) => s + i.quantity, 0)} adet)
+                Üretilen tüm ürünler ({order.items.reduce((s, i) => s + (i.produced_quantity || 0), 0)} adet)
               </p>
             </button>
 
@@ -646,38 +657,41 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
                 className="w-full p-4 rounded-xl border-2 border-border hover:border-violet-500 hover:bg-violet-500/5 transition-all text-left group"
               >
                 <p className="font-semibold text-foreground mb-1 group-hover:text-violet-600">
-                  Teslimatdan Sonraki Hepsi
+                  Teslimatdan Sonraki Yapılanlar
                   {(() => {
-                    // DOĞRU HESAPLAMA
-                    let totalAvailable = 0;
+                    // Teslimatdan sonra üretilen hesapla
+                    let totalAfterDelivery = 0;
                     let totalValue = 0;
-                    let remainingOrderQty = 0;
-                    let overProductionQty = 0;
                     
                     order.items.forEach(item => {
-                      const orderedQty = item.quantity;
-                      const deliveredQty = item.delivered_quantity || 0;
                       const producedQty = item.produced_quantity || 0;
                       
-                      const remainingOrder = Math.max(0, orderedQty - deliveredQty);
-                      const overProduction = Math.max(0, producedQty - orderedQty);
-                      const available = remainingOrder + overProduction;
+                      // Son teslimat anındaki üretim miktarını bul
+                      let lastProducedAtDelivery = 0;
+                      deliveries.forEach(delivery => {
+                        delivery.items.forEach((di: any) => {
+                          if (di.order_item_id === item.id) {
+                            lastProducedAtDelivery = Math.max(lastProducedAtDelivery, di.produced_quantity_at_delivery || 0);
+                          }
+                        });
+                      });
                       
-                      totalAvailable += available;
-                      totalValue += available * item.unit_price;
-                      remainingOrderQty += remainingOrder;
-                      overProductionQty += overProduction;
+                      // Teslimatdan sonra üretilen
+                      const producedAfterDelivery = Math.max(0, producedQty - lastProducedAtDelivery);
+                      
+                      totalAfterDelivery += producedAfterDelivery;
+                      totalValue += producedAfterDelivery * item.unit_price;
                     });
                     
-                    return totalAvailable > 0 ? (
+                    return totalAfterDelivery > 0 ? (
                       <span className="ml-2 text-xs font-bold text-violet-600">
-                        ({totalAvailable} adet · {formatCurrency(totalValue)})
+                        ({totalAfterDelivery} adet · {formatCurrency(totalValue)})
                       </span>
                     ) : null;
                   })()}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Kalan sipariş + Fazla üretimler
+                  Son teslimattan sonra üretilen + Fazla üretimler
                 </p>
               </button>
             )}
@@ -703,21 +717,26 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
   
   // Elle Oluştur - Ürün Seçim Ekranı
   if (mode === "custom" && invoiceItems.length === 0) {
-    // Teslimatdan sonraki ürünleri hesapla
+    // Teslimatdan sonra üretilen ürünleri hesapla
     const availableItems = order.items
       .map(item => {
-        const orderedQty = item.quantity;
-        const deliveredQty = item.delivered_quantity || 0;
         const producedQty = item.produced_quantity || 0;
         
-        const remainingOrder = Math.max(0, orderedQty - deliveredQty);
-        const overProduction = Math.max(0, producedQty - orderedQty);
-        const totalAvailable = remainingOrder + overProduction;
+        // Son teslimat anındaki üretim miktarını bul
+        let lastProducedAtDelivery = 0;
+        deliveries.forEach(delivery => {
+          delivery.items.forEach((di: any) => {
+            if (di.order_item_id === item.id) {
+              lastProducedAtDelivery = Math.max(lastProducedAtDelivery, di.produced_quantity_at_delivery || 0);
+            }
+          });
+        });
+        
+        // Teslimatdan sonra üretilen
+        const totalAvailable = Math.max(0, producedQty - lastProducedAtDelivery);
         
         return {
           ...item,
-          remainingOrder,
-          overProduction,
           totalAvailable,
         };
       })
@@ -803,10 +822,7 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
                               <ColorBadge color={item.color} />
                               <div>
                                 <p className="text-xs text-muted-foreground">
-                                  {item.remainingOrder} sipariş
-                                  {item.overProduction > 0 && (
-                                    <span className="text-amber-600"> + {item.overProduction} fazla</span>
-                                  )}
+                                  {item.totalAvailable} adet mevcut
                                 </p>
                               </div>
                             </div>

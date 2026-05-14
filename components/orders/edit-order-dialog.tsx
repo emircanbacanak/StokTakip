@@ -182,36 +182,78 @@ export function EditOrderDialog({
     setSaving(true);
     const sb = createClient();
 
-    // Mevcut order_items'ları id ile map'le - produced/delivered değerlerini koru
-    const existingMap = new Map<string, { produced_quantity: number; delivered_quantity: number }>();
+    // Mevcut order_items'ları map'le
+    const existingMap = new Map<string, OrderItem>();
     order.items.forEach((oi) => {
-      // key: product_name + color kombinasyonu
-      existingMap.set(`${oi.product_name}__${oi.color}`, {
-        produced_quantity: oi.produced_quantity || 0,
-        delivered_quantity: oi.delivered_quantity || 0,
-      });
+      existingMap.set(oi.id, oi);
     });
 
-    // Mevcut order_items'ları sil
-    await sb.from("order_items").delete().eq("order_id", order.id);
-
-    // Yeni order_items ekle - mevcut produced/delivered değerlerini koru
-    const orderItems = items.flatMap((item) =>
+    // Yeni items'dan order_items listesi oluştur
+    const newOrderItems = items.flatMap((item) =>
       item.colors.map((c) => {
-        const existing = existingMap.get(`${item.product_name}__${c.color}`);
-        return {
-          order_id: order.id,
-          product_name: item.product_name,
-          color: c.color,
-          quantity: c.quantity,
-          unit_price: item.unit_price,
-          produced_quantity: existing?.produced_quantity ?? 0,
-          delivered_quantity: existing?.delivered_quantity ?? 0,
-        };
+        // Eğer c.id varsa (mevcut item), o item'ı güncelle
+        if (c.id && existingMap.has(c.id)) {
+          const existing = existingMap.get(c.id)!;
+          return {
+            id: c.id,
+            order_id: order.id,
+            product_name: item.product_name,
+            color: c.color,
+            quantity: c.quantity,
+            unit_price: item.unit_price,
+            produced_quantity: existing.produced_quantity || 0,
+            delivered_quantity: existing.delivered_quantity || 0,
+          };
+        } else {
+          // Yeni item
+          return {
+            order_id: order.id,
+            product_name: item.product_name,
+            color: c.color,
+            quantity: c.quantity,
+            unit_price: item.unit_price,
+            produced_quantity: 0,
+            delivered_quantity: 0,
+          };
+        }
       })
     );
 
-    await sb.from("order_items").insert(orderItems);
+    // Silinecek item'ları bul (mevcut items'da olup yeni items'da olmayan)
+    const newItemIds = new Set(newOrderItems.filter(i => i.id).map(i => i.id!));
+    const itemsToDelete = order.items.filter(oi => !newItemIds.has(oi.id)).map(oi => oi.id);
+
+    // Önce silinecek item'ları sil
+    if (itemsToDelete.length > 0) {
+      // Önce bu item'lara ait delivery_items'ları sil
+      await sb.from("delivery_items").delete().in("order_item_id", itemsToDelete);
+      // Sonra order_items'ları sil
+      await sb.from("order_items").delete().in("id", itemsToDelete);
+    }
+
+    // Mevcut item'ları güncelle ve yeni item'ları ekle
+    for (const item of newOrderItems) {
+      if (item.id) {
+        // UPDATE
+        await sb.from("order_items").update({
+          product_name: item.product_name,
+          color: item.color,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+        }).eq("id", item.id);
+      } else {
+        // INSERT
+        await sb.from("order_items").insert({
+          order_id: item.order_id,
+          product_name: item.product_name,
+          color: item.color,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          produced_quantity: 0,
+          delivered_quantity: 0,
+        });
+      }
+    }
 
     // Toplam tutarı güncelle
     await sb.from("orders").update({

@@ -140,11 +140,18 @@ export function NewDeliveryDialog({
 
       // Create delivery items
       const { error: itemsError } = await sb.from("delivery_items").insert(
-        itemsToDeliver.map((item) => ({
-          delivery_id: delivery.id,
-          order_item_id: item.order_item_id,
-          quantity: item.quantity,
-        }))
+        itemsToDeliver.map((item) => {
+          // O anki produced_quantity'yi bul
+          const orderItem = order.items.find(i => i.id === item.order_item_id);
+          const producedQty = orderItem?.produced_quantity || 0;
+          
+          return {
+            delivery_id: delivery.id,
+            order_item_id: item.order_item_id,
+            quantity: item.quantity,
+            produced_quantity_at_delivery: producedQty, // Teslimat anındaki üretim miktarı
+          };
+        })
       );
 
       if (itemsError) {

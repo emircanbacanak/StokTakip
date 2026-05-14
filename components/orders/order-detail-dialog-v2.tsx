@@ -340,7 +340,25 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
         .from("payments").select("*").eq("order_id", order.id).order("payment_date", { ascending: false});
       const { data: orderData } = await sb
         .from("orders").select("*, buyer:buyers(*), items:order_items(*)").eq("id", order.id).single();
-      if (orderData) setOrder(orderData as any);
+      if (orderData) {
+        // Debug: Her ürünü kontrol et
+        let debugTotal = 0;
+        (orderData as any).items.forEach((item: any) => {
+          const produced = item.produced_quantity || 0;
+          const delivered = item.delivered_quantity || 0;
+          const remaining = produced - delivered;
+          if (remaining > 0) {
+            debugTotal += remaining;
+          }
+          // Sadece sorunlu ürünleri logla
+          if (remaining < 0 || produced === null || delivered === null) {
+            console.log('⚠️ Sorunlu ürün:', item.product_name, item.color, 'P:', produced, 'D:', delivered, 'R:', remaining);
+          }
+        });
+        
+        console.log('📦 Order items loaded:', (orderData as any).items.length, 'items, Total produced:', debugTotal);
+        setOrder(orderData as any);
+      }
       setDeliveries((deliveriesData as any) || []);
       setPayments(paymentsData || []);
       if (deliveriesError || paymentsError) { setTablesNotFound(true); }
@@ -765,6 +783,7 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
       )}
       {showInvoice && (
         <InvoiceDialog 
+          key={`invoice-${order.id}-${Date.now()}`} // Her açılışta yeni instance
           order={order} 
           onClose={() => setShowInvoice(false)} 
           onSuccess={() => {

@@ -41,7 +41,11 @@ export function EditDeliveryDialog({
   onSuccess: () => void;
 }) {
   const { toast } = useToast();
-  const [deliveryDate, setDeliveryDate] = useState(delivery.delivery_date);
+  // Convert ISO timestamp to yyyy-MM-dd format for date input
+  const [deliveryDate, setDeliveryDate] = useState(() => {
+    const date = new Date(delivery.delivery_date);
+    return date.toISOString().split('T')[0];
+  });
   const [notes, setNotes] = useState(delivery.notes || "");
   const [loading, setLoading] = useState(false);
   
@@ -92,6 +96,10 @@ export function EditDeliveryDialog({
     });
     
     setDeliveryItems(items);
+    
+    // Update delivery date when delivery prop changes
+    const date = new Date(delivery.delivery_date);
+    setDeliveryDate(date.toISOString().split('T')[0]);
   }, [delivery]);
 
   // Eklenebilecek yeni ürünler (henüz bu teslimat içinde olmayan)
@@ -216,15 +224,22 @@ export function EditDeliveryDialog({
       // 4. Yeni kalemleri ekle
       const itemsToInsert = deliveryItems.filter(item => !item.id && !item.isDeleted && item.quantity > 0);
       if (itemsToInsert.length > 0) {
+        // Her yeni kalem için o anki produced_quantity'yi bul
+        const insertData = itemsToInsert.map(item => {
+          const orderItem = order.items.find(oi => oi.id === item.order_item_id);
+          const producedQty = orderItem?.produced_quantity || 0;
+          
+          return {
+            delivery_id: delivery.id,
+            order_item_id: item.order_item_id,
+            quantity: item.quantity,
+            produced_quantity_at_delivery: producedQty, // Teslimat anındaki üretim miktarı
+          };
+        });
+        
         const { error: insertError } = await sb
           .from("delivery_items")
-          .insert(
-            itemsToInsert.map(item => ({
-              delivery_id: delivery.id,
-              order_item_id: item.order_item_id,
-              quantity: item.quantity,
-            }))
-          );
+          .insert(insertData);
         
         if (insertError) throw insertError;
       }
