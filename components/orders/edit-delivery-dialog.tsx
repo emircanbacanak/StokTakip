@@ -27,6 +27,7 @@ interface EditDeliveryItemInput {
   color: string;
   unit_price: number;
   isDeleted?: boolean;
+  size_name?: string | null;
 }
 
 export function EditDeliveryDialog({
@@ -70,6 +71,7 @@ export function EditDeliveryDialog({
         color: item.order_item.color,
         unit_price: item.order_item.unit_price || 0,
         isDeleted: false,
+        size_name: item.order_item.size_name,
       };
     });
   });
@@ -92,6 +94,7 @@ export function EditDeliveryDialog({
         color: item.order_item.color,
         unit_price: item.order_item.unit_price || 0,
         isDeleted: false,
+        size_name: item.order_item.size_name,
       };
     });
     
@@ -127,6 +130,7 @@ export function EditDeliveryDialog({
           color: item.color,
           unit_price: item.unit_price,
           isDeleted: false,
+          size_name: item.size_name,
         };
       });
     setAvailableItems(available);
@@ -275,10 +279,12 @@ export function EditDeliveryDialog({
   const groupedItems = useMemo(() => {
     const map = new Map<string, EditDeliveryItemInput[]>();
     activeItems.forEach((item) => {
-      if (!map.has(item.product_name)) {
-        map.set(item.product_name, []);
+      // Boyut bilgisini ürün adına ekle
+      const productKey = item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name;
+      if (!map.has(productKey)) {
+        map.set(productKey, []);
       }
-      map.get(item.product_name)!.push(item);
+      map.get(productKey)!.push(item);
     });
     return map;
   }, [activeItems]);
@@ -457,7 +463,9 @@ export function EditDeliveryDialog({
                         <div className="flex items-center gap-2.5">
                           <ColorBadge color={item.color} />
                           <div>
-                            <p className="text-sm font-semibold text-foreground">{item.product_name}</p>
+                            <p className="text-sm font-semibold text-foreground">
+                              {item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name}
+                            </p>
                             <p className="text-xs text-muted-foreground">{item.color} · {item.max_quantity} adet mevcut</p>
                           </div>
                         </div>

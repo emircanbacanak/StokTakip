@@ -41,7 +41,7 @@ interface RawOrder {
   paid_amount: number;
   status: string;
   buyer: { id: string; name: string };
-  items: Array<{ id: string; product_name: string; quantity: number; unit_price: number; produced_quantity: number }>;
+  items: Array<{ id: string; product_name: string; quantity: number; unit_price: number; produced_quantity: number; size_name?: string | null }>;
   deliveries: Array<{ id: string; delivery_date: string; notes: string | null }>;
   payments: Array<{ id: string; amount: number; payment_date: string; payment_method: string | null; notes: string | null }>;
 }
@@ -94,7 +94,7 @@ export function AccountingOverviewTab() {
       const { data } = await sb.from("orders").select(`
         id, created_at, total_amount, paid_amount, status,
         buyer:buyers(id, name),
-        items:order_items(id, product_name, quantity, unit_price, produced_quantity),
+        items:order_items(id, product_name, quantity, unit_price, produced_quantity, size_name),
         deliveries(id, delivery_date, notes),
         payments(id, amount, payment_date, payment_method, notes)
       `).order("created_at", { ascending: false });
@@ -184,7 +184,7 @@ export function AccountingOverviewTab() {
 
       // Product summaries
       for (const item of order.items ?? []) {
-        const key = item.product_name;
+        const key = item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name;
         if (!productMap.has(key)) {
           productMap.set(key, {
             product_name: key,

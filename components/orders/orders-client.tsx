@@ -104,7 +104,7 @@ export function OrdersClient() {
     let sb; try { sb = createClient(); } catch { setLoading(false); return; }
     const { data } = await sb
       .from("orders")
-      .select("id, created_at, total_amount, paid_amount, status, notes, buyer:buyers(id,name), items:order_items(id,product_name,color,quantity,produced_quantity,delivered_quantity,unit_price)")
+      .select("id, created_at, total_amount, paid_amount, status, notes, buyer:buyers(id,name), items:order_items(id,product_name,color,quantity,produced_quantity,delivered_quantity,unit_price,size_name)")
       .order("created_at", { ascending: false });
     const list = (data as unknown as Order[]) || [];
     setOrders(list);

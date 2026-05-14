@@ -1,22 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Trash2, X, ShoppingCart, Palette, Pencil } from "lucide-react";
+import { Plus, Trash2, X, ShoppingCart, Palette, Pencil, Ruler } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import type { Buyer, Product } from "@/lib/types/database";
+import type { Buyer, Product, ProductSize } from "@/lib/types/database";
 import { AddColorsDialog } from "./add-colors-dialog";
 import { useConfirm } from "@/hooks/use-confirm";
 
 interface ColorItem { color: string; quantity: number }
-interface Item { product_name: string; unit_price: number; colors: ColorItem[] }
+interface Item { 
+  product_name: string; 
+  unit_price: number; 
+  colors: ColorItem[];
+  product_id?: string; // Boyut kontrolü için
+  size_id?: string | null;
+  size_name?: string | null;
+}
 
 const inputCls = "w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all";
 
 export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; onClose: () => void; onSuccess: () => void }) {
   const [buyers, setBuyers] = useState<Buyer[]>([]);
-  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
+  const [catalogProducts, setCatalogProducts] = useState<(Product & { sizes?: ProductSize[] })[]>([]);
   const [colorList, setColorList] = useState<string[]>([]);
   const [buyerId, setBuyerId] = useState("");
   const [paid, setPaid] = useState("0");
@@ -36,7 +43,23 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
     if (open) {
       let sb; try { sb = createClient(); } catch { return; }
       sb.from("buyers").select("*").order("name").then(({ data }) => { if (data) setBuyers(data); });
-      sb.from("products").select("id, name").order("name").then(({ data }) => { if (data) setCatalogProducts(data as Product[]); });
+      
+      // Ürünleri ve boyutlarını yükle
+      sb.from("products").select("id, name, has_sizes").order("name").then(async ({ data }) => { 
+        if (data) {
+          const productsWithSizes = await Promise.all(
+            data.map(async (p) => {
+              if (p.has_sizes) {
+                const { data: sizes } = await sb.from("product_sizes").select("*").eq("product_id", p.id).order("sort_order");
+                return { ...p, sizes: sizes || [] };
+              }
+              return { ...p, sizes: [] };
+            })
+          );
+          setCatalogProducts(productsWithSizes as any);
+        }
+      });
+      
       sb.from("colors").select("name, usage_count").order("usage_count", { ascending: false }).order("name").then(({ data }) => {
         if (data) setColorList(data.map((c: { name: string }) => c.name));
       });
@@ -108,7 +131,16 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
       updateProductName(idx, "");
     } else {
       setCustomIdx((prev) => { const s = new Set(prev); s.delete(idx); return s; });
-      updateProductName(idx, val);
+      const product = catalogProducts.find(p => p.name === val);
+      const next = [...items];
+      next[idx] = { 
+        ...next[idx], 
+        product_name: val,
+        product_id: product?.id,
+        size_id: null,
+        size_name: null,
+      };
+      setItems(next);
     }
   }
 
@@ -168,6 +200,15 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
     if (items.some((i) => !i.product_name)) { toast({ title: "Ürün adlarını doldurun", variant: "destructive" }); return; }
     if (items.some((i) => i.colors.some((c) => !c.color))) { toast({ title: "Renkleri seçin", variant: "destructive" }); return; }
     
+    // Boyutlu ürünler için boyut kontrolü
+    for (const item of items) {
+      const product = catalogProducts.find(p => p.id === item.product_id);
+      if (product?.has_sizes && !item.size_id) {
+        toast({ title: "Boyut seçin", description: `"${item.product_name}" için boyut seçmelisiniz`, variant: "destructive" });
+        return;
+      }
+    }
+    
     setSaving(true);
     let sb; try { sb = createClient(); } catch { setSaving(false); return; }
     
@@ -194,7 +235,9 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
         quantity: c.quantity,
         unit_price: item.unit_price,
         produced_quantity: 0,
-        delivered_quantity: 0
+        delivered_quantity: 0,
+        size_id: item.size_id || null,
+        size_name: item.size_name || null,
       }))
     );
 
@@ -312,12 +355,49 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
                         step="0.01" 
                         value={item.unit_price} 
                         onChange={(e) => updateUnitPrice(itemIdx, parseFloat(e.target.value) || 0)} 
-                        onFocus={(e) => e.target.select()}
-                        onWheel={(e) => e.currentTarget.blur()}
+                        onClick={(e) => e.currentTarget.select()}
                         className={inputCls}
                       />
                     </div>
                   </div>
+
+                  {/* Boyut Seçimi (eğer ürün boyutlu ise) */}
+                  {(() => {
+                    const product = catalogProducts.find(p => p.id === item.product_id);
+                    if (product?.has_sizes && product.sizes && product.sizes.length > 0) {
+                      return (
+                        <div>
+                          <label className="text-[10px] text-muted-foreground mb-1.5 block font-medium flex items-center gap-1">
+                            <Ruler className="w-3 h-3" />
+                            BOYUT SEÇİN *
+                          </label>
+                          <select
+                            value={item.size_id || ""}
+                            onChange={(e) => {
+                              const sizeId = e.target.value;
+                              const size = product.sizes?.find(s => s.id === sizeId);
+                              const next = [...items];
+                              next[itemIdx] = {
+                                ...next[itemIdx],
+                                size_id: sizeId || null,
+                                size_name: size?.size_name || null,
+                              };
+                              setItems(next);
+                            }}
+                            className={inputCls}
+                          >
+                            <option value="">Boyut seçin...</option>
+                            {product.sizes.map((size) => (
+                              <option key={size.id} value={size.id}>
+                                {size.size_name} ({size.weight_grams} gr)
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
 
                   {/* Renkler */}
                   <div>
@@ -447,14 +527,13 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
                                   updateColor(itemIdx, colorIdx, "quantity", val === "" ? "" as any : parseInt(val));
                                 }
                               }}
-                              onFocus={(e) => e.target.select()}
+                              onClick={(e) => e.currentTarget.select()}
                               onBlur={(e) => {
                                 const val = e.target.value;
                                 if (val === "" || parseInt(val) < 1) {
                                   updateColor(itemIdx, colorIdx, "quantity", 1);
                                 }
                               }}
-                              onWheel={(e) => e.currentTarget.blur()}
                               className={inputCls + " text-xs text-center"} 
                             />
                           </div>
@@ -479,6 +558,7 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
                   <div className="pt-2 border-t border-border flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">
                       {item.colors.reduce((sum, c) => sum + c.quantity, 0)} adet · {item.colors.length} renk · {formatCurrency(item.unit_price)}/adet
+                      {item.size_name && <span className="ml-1 text-violet-600 dark:text-violet-400 font-medium">· {item.size_name}</span>}
                     </span>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-bold text-foreground">

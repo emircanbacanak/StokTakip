@@ -16,6 +16,7 @@ export type Database = {
           description: string | null;
           image_url: string | null;
           weight_grams: number;
+          has_sizes: boolean;
           created_at: string;
         };
         Insert: {
@@ -24,6 +25,7 @@ export type Database = {
           description?: string | null;
           image_url?: string | null;
           weight_grams?: number;
+          has_sizes?: boolean;
           created_at?: string;
         };
         Update: {
@@ -32,9 +34,45 @@ export type Database = {
           description?: string | null;
           image_url?: string | null;
           weight_grams?: number;
+          has_sizes?: boolean;
           created_at?: string;
         };
         Relationships: [];
+      };
+      product_sizes: {
+        Row: {
+          id: string;
+          product_id: string;
+          size_name: string;
+          weight_grams: number;
+          sort_order: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          product_id: string;
+          size_name: string;
+          weight_grams: number;
+          sort_order?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          product_id?: string;
+          size_name?: string;
+          weight_grams?: number;
+          sort_order?: number;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "product_sizes_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       cost_settings: {
         Row: {
@@ -333,6 +371,8 @@ export type Database = {
           produced_quantity: number;
           delivered_quantity: number;
           unit_price: number;
+          size_id: string | null;
+          size_name: string | null;
           created_at: string;
         };
         Insert: {
@@ -344,6 +384,8 @@ export type Database = {
           produced_quantity?: number;
           delivered_quantity?: number;
           unit_price: number;
+          size_id?: string | null;
+          size_name?: string | null;
           created_at?: string;
         };
         Update: {
@@ -355,6 +397,8 @@ export type Database = {
           produced_quantity?: number;
           delivered_quantity?: number;
           unit_price?: number;
+          size_id?: string | null;
+          size_name?: string | null;
         };
         Relationships: [
           {
@@ -362,6 +406,13 @@ export type Database = {
             columns: ["order_id"];
             isOneToOne: false;
             referencedRelation: "orders";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "order_items_size_id_fkey";
+            columns: ["size_id"];
+            isOneToOne: false;
+            referencedRelation: "product_sizes";
             referencedColumns: ["id"];
           }
         ];
@@ -526,6 +577,10 @@ export type Database = {
 // Kolay kullanım için tip kısayolları
 export type Product = Database["public"]["Tables"]["products"]["Row"];
 export type ProductInsert = Database["public"]["Tables"]["products"]["Insert"];
+
+export type ProductSize = Database["public"]["Tables"]["product_sizes"]["Row"];
+export type ProductSizeInsert = Database["public"]["Tables"]["product_sizes"]["Insert"];
+export type ProductSizeUpdate = Database["public"]["Tables"]["product_sizes"]["Update"];
 
 export type CostSettings = Database["public"]["Tables"]["cost_settings"]["Row"];
 export type CostSettingsInsert = Database["public"]["Tables"]["cost_settings"]["Insert"];

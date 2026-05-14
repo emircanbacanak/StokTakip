@@ -11,6 +11,7 @@ interface PItem {
   id: string; product_name: string; color: string;
   quantity: number; produced_quantity: number; order_id: string;
   order: { id: string; created_at: string; buyer: { name: string } };
+  size_name?: string | null;
 }
 
 function ProductThumb({ name }: { name: string }) {
@@ -73,7 +74,7 @@ export function ProductionClient() {
     let sb; try { sb = createClient(); } catch { setLoading(false); return; }
     const { data } = await sb
       .from("order_items")
-      .select("id, product_name, color, quantity, produced_quantity, order_id, order:orders(id, created_at, buyer:buyers(name))")
+      .select("id, product_name, color, quantity, produced_quantity, order_id, size_name, order:orders(id, created_at, buyer:buyers(name))")
       .order("product_name");
     const incomplete = ((data as unknown as PItem[]) || []).filter((i) => i.produced_quantity < i.quantity);
     setItems(incomplete);
@@ -130,7 +131,8 @@ export function ProductionClient() {
   const buyerMap = new Map<string, Map<string, PItem[]>>();
   items.forEach((item) => {
     const buyerName = item.order.buyer.name;
-    const productName = item.product_name;
+    // Boyut bilgisini ürün adına ekle
+    const productName = item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name;
     if (!buyerMap.has(buyerName)) buyerMap.set(buyerName, new Map());
     const productMap = buyerMap.get(buyerName)!;
     if (!productMap.has(productName)) productMap.set(productName, []);

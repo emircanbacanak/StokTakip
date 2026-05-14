@@ -86,6 +86,23 @@ buyers (Alıcılar)
 ├── address: text
 └── created_at: timestamp
 
+products (Ürünler)
+├── id: uuid (PK)
+├── name: text
+├── description: text
+├── image_url: text
+├── weight_grams: numeric (boyutsuz ürünler için)
+├── has_sizes: boolean (ürünün farklı boyutları var mı?)
+└── created_at: timestamp
+
+product_sizes (Ürün Boyutları) **YENİ**
+├── id: uuid (PK)
+├── product_id: uuid (FK → products)
+├── size_name: text (örn: "13cm", "15cm", "17cm")
+├── weight_grams: numeric (her boyutun gramajı)
+├── sort_order: integer
+└── created_at: timestamp
+
 orders (Siparişler)
 ├── id: uuid (PK)
 ├── buyer_id: uuid (FK → buyers)
@@ -105,6 +122,8 @@ order_items (Sipariş Kalemleri)
 ├── produced_quantity: integer
 ├── delivered_quantity: integer
 ├── unit_price: numeric
+├── size_id: uuid (FK → product_sizes, nullable) **YENİ**
+├── size_name: text (denormalize, nullable) **YENİ**
 └── created_at: timestamp
 
 deliveries (Teslimatlar)
@@ -136,18 +155,13 @@ colors (Renkler)
 ├── name: text
 ├── usage_count: integer
 └── created_at: timestamp
-
-products (Ürünler)
-├── id: uuid (PK)
-├── name: text
-├── description: text
-├── image_url: text
-└── created_at: timestamp
 ```
 
 ### Önemli İlişkiler
 - Bir alıcının birden fazla siparişi olabilir (1:N)
+- Bir ürünün birden fazla boyutu olabilir (1:N) **YENİ**
 - Bir siparişin birden fazla kalemi olabilir (1:N)
+- Bir sipariş kalemi bir boyuta sahip olabilir (N:1, opsiyonel) **YENİ**
 - Bir sipariş birden fazla teslimat alabilir (1:N)
 - Bir teslimat birden fazla ödeme alabilir (1:N)
 
@@ -176,9 +190,20 @@ products (Ürünler)
 
 ## 🔑 Önemli Özellikler
 
-### 1. Sipariş Yönetimi (components/orders/)
+### 1. Ürün Yönetimi (components/products/)
+- **product-catalog-client.tsx** - Ürün kataloğu ve ekleme
+  - Boyut özelliği desteği (checkbox ile aktif/pasif)
+  - Her boyut için ayrı gramaj girişi
+  - Boyut bazlı maliyet önizlemesi
+- **stock-client.tsx** - Stok durumu
+- **product-cost-calculator.tsx** - Maliyet hesaplama
+
+### 2. Sipariş Yönetimi (components/orders/)
 - **new-order-dialog.tsx** - Yeni sipariş oluşturma
+  - Boyutlu ürünler için otomatik boyut seçimi
+  - Boyut seçimi zorunlu validasyonu
 - **edit-order-dialog.tsx** - Sipariş düzenleme
+  - Boyut bilgisi koruma ve değiştirme
 - **order-detail-dialog-v2.tsx** - Sipariş detayları (GÜNCEL)
 - **add-colors-dialog.tsx** - Sipariş renklerini güncelleme
 - **new-delivery-dialog.tsx** - Teslimat ekleme
@@ -384,6 +409,19 @@ npm run lint
 - "Veritabanı şeması nedir?" → Bu dosyanın "Veritabanı Şeması" bölümü
 - "Hangi bileşenler var?" → Bu dosyanın "UI Bileşen Sistemi" bölümü
 - "Yeni özellik nasıl eklenir?" → Bu dosyanın "Hızlı Referans" bölümü
+- "Boyut özelliği nasıl çalışır?" → `BOYUT_OZELLIGI_UYGULAMA.md` dosyasını oku
+
+---
+
+## 📋 Son Güncellemeler
+
+### 14 Mayıs 2026 - Ürün Boyut Özelliği
+- ✅ `product_sizes` tablosu eklendi
+- ✅ Ürünlere boyut ekleme özelliği (checkbox ile)
+- ✅ Sipariş oluştururken boyut seçimi
+- ✅ Boyut bazlı maliyet hesaplama
+- ✅ Migration dosyası: `migration-add-product-sizes.sql`
+- 📄 Detaylı dokümantasyon: `BOYUT_OZELLIGI_UYGULAMA.md`
 
 ---
 

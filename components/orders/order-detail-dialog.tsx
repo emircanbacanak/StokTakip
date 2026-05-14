@@ -36,7 +36,7 @@ function ProductThumb({ name }: { name: string }) {
   );
 }
 
-interface OrderItem { id: string; product_name: string; color: string; quantity: number; produced_quantity: number; unit_price: number }
+interface OrderItem { id: string; product_name: string; color: string; quantity: number; produced_quantity: number; unit_price: number; size_name?: string | null }
 interface Order {
   id: string; created_at: string; total_amount: number; paid_amount: number;
   status: OrderStatus; notes: string | null;
@@ -111,7 +111,9 @@ export function OrderDetailDialog({ order, onClose, onStatusChange }: { order: O
                       <div className="flex items-center gap-3">
                         <ProductThumb name={item.product_name} />
                         <div>
-                          <p className="font-semibold text-sm text-foreground">{item.product_name}</p>
+                          <p className="font-semibold text-sm text-foreground">
+                            {item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name}
+                          </p>
                           <div className="flex items-center gap-2 mt-0.5">
                             <span className="text-[10px] bg-background border border-border px-2 py-0.5 rounded-full text-muted-foreground font-medium">{item.color}</span>
                             <span className="text-xs text-muted-foreground">{item.quantity} adet · {formatCurrency(item.unit_price)}/adet</span>

@@ -31,7 +31,8 @@ export default function InvoicePage() {
             quantity,
             produced_quantity,
             delivered_quantity,
-            unit_price
+            unit_price,
+            size_name
           )
         `)
         .eq("id", orderId)
@@ -75,9 +76,14 @@ export default function InvoicePage() {
     total: number;
   }> = [];
 
+  // Boyut bilgisini ürün adına ekle
+  const formatProductName = (item: any) => {
+    return item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name;
+  };
+
   if (mode === "all") {
     invoiceItems = order.items.map((item: any) => ({
-      product_name: item.product_name,
+      product_name: formatProductName(item),
       color: item.color,
       quantity: item.quantity,
       unit_price: item.unit_price,
@@ -90,7 +96,7 @@ export default function InvoicePage() {
         if (remainingProduced <= 0) return null;
         
         return {
-          product_name: item.product_name,
+          product_name: formatProductName(item),
           color: item.color,
           quantity: remainingProduced,
           unit_price: item.unit_price,

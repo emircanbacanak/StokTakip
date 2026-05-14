@@ -16,6 +16,7 @@ interface OrderItem {
   produced_quantity: number;
   delivered_quantity: number;
   unit_price: number;
+  size_name?: string | null;
 }
 
 interface Delivery {
@@ -45,6 +46,14 @@ interface InvoiceDialogProps {
   order: Order;
   onClose: () => void;
   onSuccess?: () => void;
+}
+
+// Ürün adını boyut bilgisi ile birlikte formatla
+function formatProductName(item: OrderItem): string {
+  if (item.size_name) {
+    return `${item.product_name} (${item.size_name})`;
+  }
+  return item.product_name;
 }
 
 export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps) {
@@ -105,7 +114,7 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
         const producedQty = item.produced_quantity || 0;
         
         return {
-          product_name: item.product_name,
+          product_name: formatProductName(item),
           color: item.color,
           quantity: producedQty, // Üretilen miktar (sipariş + fazlalık)
           unit_price: item.unit_price,
@@ -124,7 +133,7 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
           if (remainingProduced <= 0) return null;
           
           return {
-            product_name: item.product_name,
+            product_name: formatProductName(item),
             color: item.color,
             quantity: remainingProduced,
             unit_price: item.unit_price,
@@ -161,7 +170,7 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
           if (producedAfterDelivery <= 0) return null;
           
           return {
-            product_name: item.product_name,
+            product_name: formatProductName(item),
             color: item.color,
             quantity: producedAfterDelivery,
             unit_price: item.unit_price,
@@ -179,7 +188,7 @@ export function InvoiceDialog({ order, onClose, onSuccess }: InvoiceDialogProps)
           if (!item || quantity <= 0) return null;
           
           return {
-            product_name: item.product_name,
+            product_name: formatProductName(item),
             color: item.color,
             quantity: quantity,
             unit_price: item.unit_price,

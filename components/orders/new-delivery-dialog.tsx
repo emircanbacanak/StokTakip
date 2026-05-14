@@ -206,10 +206,12 @@ export function NewDeliveryDialog({
     const alreadyDelivered = item.delivered_quantity || 0;
     const availableToDeliver = producedQty - alreadyDelivered;
     if (availableToDeliver <= 0) return; // Teslim edilecek bir şey yoksa atla
-    if (!groupedItems.has(item.product_name)) {
-      groupedItems.set(item.product_name, []);
+    // Boyut bilgisini ürün adına ekle
+    const productKey = item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name;
+    if (!groupedItems.has(productKey)) {
+      groupedItems.set(productKey, []);
     }
-    groupedItems.get(item.product_name)!.push(item);
+    groupedItems.get(productKey)!.push(item);
   });
 
   // Üretilmiş ürünleri grupla
@@ -219,10 +221,12 @@ export function NewDeliveryDialog({
     const alreadyDelivered = item.delivered_quantity || 0;
     const availableToDeliver = producedQty - alreadyDelivered;
     if (availableToDeliver <= 0) return;
-    if (!producedGrouped.has(item.product_name)) {
-      producedGrouped.set(item.product_name, []);
+    // Boyut bilgisini ürün adına ekle
+    const productKey = item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name;
+    if (!producedGrouped.has(productKey)) {
+      producedGrouped.set(productKey, []);
     }
-    producedGrouped.get(item.product_name)!.push(item);
+    producedGrouped.get(productKey)!.push(item);
   });
 
   // Toplam üretilmiş adet (henüz teslim edilmemiş)

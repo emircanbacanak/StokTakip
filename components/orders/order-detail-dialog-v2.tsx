@@ -99,6 +99,14 @@ function ItemsTab({ items, totalDelivered, totalOrdered, updateProduction }: {
     updateProduction(id, qty, max);
   }
 
+  // Ürün adını boyut bilgisi ile birlikte formatla
+  function formatProductName(item: OrderItem): string {
+    if (item.size_name) {
+      return `${item.product_name} (${item.size_name})`;
+    }
+    return item.product_name;
+  }
+
   // Teslim Edilenler: Gerçekten teslimat yapılmış (delivered_quantity > 0)
   const deliveredItems = items.filter(item => (item.delivered_quantity || 0) > 0);
   
@@ -108,8 +116,9 @@ function ItemsTab({ items, totalDelivered, totalOrdered, updateProduction }: {
   const groupMap = (itemList: OrderItem[]) => {
     const map = new Map<string, OrderItem[]>();
     itemList.forEach((item) => {
-      if (!map.has(item.product_name)) map.set(item.product_name, []);
-      map.get(item.product_name)!.push(item);
+      const displayName = formatProductName(item);
+      if (!map.has(displayName)) map.set(displayName, []);
+      map.get(displayName)!.push(item);
     });
     return map;
   };
@@ -599,10 +608,11 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
                   const productGroups = new Map<string, typeof delivery.items>();
                   delivery.items.forEach((item) => {
                     if (!item.order_item) return;
-                    if (!productGroups.has(item.order_item.product_name)) {
-                      productGroups.set(item.order_item.product_name, []);
+                    const displayName = formatProductName(item.order_item);
+                    if (!productGroups.has(displayName)) {
+                      productGroups.set(displayName, []);
                     }
-                    productGroups.get(item.order_item.product_name)!.push(item);
+                    productGroups.get(displayName)!.push(item);
                   });
 
                   return (

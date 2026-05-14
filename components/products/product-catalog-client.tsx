@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Plus, Trash2, ImageIcon, Loader2, Package, Pencil, X, Check, Scale } from "lucide-react";
+import { Plus, Trash2, ImageIcon, Loader2, Package, Pencil, X, Check, Scale, Ruler } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/hooks/use-confirm";
-import type { Product, CostSettings } from "@/lib/types/database";
+import type { Product, CostSettings, ProductSize } from "@/lib/types/database";
 import { calculateProductCost, DEFAULT_COST_SETTINGS } from "@/lib/cost-calculator";
 import { formatCurrency } from "@/lib/utils";
 
@@ -63,6 +63,8 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [weightGrams, setWeightGrams] = useState<string>(
     initial?.weight_grams ? String(initial.weight_grams) : ""
   );
+  const [hasSizes, setHasSizes] = useState(initial?.has_sizes ?? false);
+  const [sizes, setSizes] = useState<Array<{ id?: string; size_name: string; weight_grams: string }>>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(initial?.image_url ?? null);
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [removedBgImage, setRemovedBgImage] = useState<string | null>(null);
@@ -72,6 +74,22 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [costSettings, setCostSettings] = useState<CostSettings | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  // Mevcut boyutları yükle
+  useEffect(() => {
+    if (initial?.id && initial.has_sizes) {
+      const sb = createClient();
+      sb.from("product_sizes")
+        .select("*")
+        .eq("product_id", initial.id)
+        .order("sort_order")
+        .then(({ data }) => {
+          if (data) {
+            setSizes(data.map(s => ({ id: s.id, size_name: s.size_name, weight_grams: String(s.weight_grams) })));
+          }
+        });
+    }
+  }, [initial]);
 
   // Maliyet ayarlarını yükle
   useEffect(() => {
@@ -139,6 +157,19 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       toast({ title: "Ürün adı gerekli", variant: "destructive" });
       return;
     }
+
+    // Boyut kontrolü
+    if (hasSizes) {
+      if (sizes.length === 0) {
+        toast({ title: "En az bir boyut eklemelisiniz", variant: "destructive" });
+        return;
+      }
+      if (sizes.some(s => !s.size_name.trim() || !s.weight_grams.trim())) {
+        toast({ title: "Tüm boyut bilgilerini doldurun", variant: "destructive" });
+        return;
+      }
+    }
+
     setSaving(true);
     let sb: ReturnType<typeof createClient>;
     try { sb = createClient(); } catch { setSaving(false); return; }
@@ -152,7 +183,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       else imageUrl = imagePreview;
     }
 
-    // Gramaj: boş veya geçersiz ise 0 kaydet
+    // Gramaj: boyutsuz ürünler için
     const parsedWeight = weightGrams.trim() === "" ? 0 : parseFloat(weightGrams);
     const finalWeight = isNaN(parsedWeight) || parsedWeight < 0 ? 0 : parsedWeight;
 
@@ -160,7 +191,8 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       name: name.trim(),
       description: description.trim() || null,
       image_url: imageUrl,
-      weight_grams: finalWeight,
+      weight_grams: hasSizes ? 0 : finalWeight, // Boyutlu ürünlerde weight_grams kullanılmaz
+      has_sizes: hasSizes,
     };
 
     let dbError: any = null;
@@ -178,6 +210,35 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       toast({ title: "Kaydetme hatası", description: dbError.message, variant: "destructive" });
       setSaving(false);
       return;
+    }
+
+    // Boyutları kaydet
+    if (hasSizes) {
+      // Mevcut boyutları sil (güncelleme durumunda)
+      if (initial?.id) {
+        await sb.from("product_sizes").delete().eq("product_id", id);
+      }
+      
+      // Yeni boyutları ekle
+      const sizesToInsert = sizes.map((s, idx) => ({
+        product_id: id,
+        size_name: s.size_name.trim(),
+        weight_grams: parseFloat(s.weight_grams),
+        sort_order: idx,
+      }));
+
+      const { error: sizeError } = await sb.from("product_sizes").insert(sizesToInsert);
+      if (sizeError) {
+        console.error("Boyut kaydetme hatası:", sizeError);
+        toast({ title: "Boyut kaydetme hatası", description: sizeError.message, variant: "destructive" });
+        setSaving(false);
+        return;
+      }
+    } else {
+      // Boyut özelliği kapatıldıysa mevcut boyutları sil
+      if (initial?.id) {
+        await sb.from("product_sizes").delete().eq("product_id", id);
+      }
     }
 
     toast({ title: initial ? "Ürün güncellendi ✓" : "Ürün eklendi ✓" });
@@ -281,76 +342,218 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       </div>
 
       {/* Gramaj */}
-      <div>
-        <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block flex items-center gap-1">
-          <Scale className="w-3 h-3" /> Gramaj (gr)
+      {!hasSizes && (
+        <div>
+          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block flex items-center gap-1">
+            <Scale className="w-3 h-3" /> Gramaj (gr)
+          </label>
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            value={weightGrams}
+            onChange={(e) => setWeightGrams(e.target.value)}
+            placeholder="Örn: 40"
+            className={inputCls}
+          />
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Ürünün baskı ağırlığı. Maliyet hesaplaması için gereklidir.
+          </p>
+        </div>
+      )}
+
+      {/* Boyut Özelliği */}
+      <div className="bg-muted/30 rounded-xl p-3 border border-border">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={hasSizes}
+            onChange={(e) => {
+              setHasSizes(e.target.checked);
+              if (e.target.checked && sizes.length === 0) {
+                setSizes([{ size_name: "", weight_grams: "" }]);
+              }
+            }}
+            className="w-4 h-4 rounded border-border text-blue-500 focus:ring-2 focus:ring-blue-500/50"
+          />
+          <div className="flex-1">
+            <div className="flex items-center gap-1.5">
+              <Ruler className="w-3.5 h-3.5 text-blue-500" />
+              <span className="text-sm font-semibold text-foreground">Bu ürünün farklı boyutları var</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Örn: 13cm, 15cm, 17cm gibi farklı boyutlar ve her boyut için ayrı gramaj
+            </p>
+          </div>
         </label>
-        <input
-          type="number"
-          step="0.1"
-          min="0"
-          value={weightGrams}
-          onChange={(e) => setWeightGrams(e.target.value)}
-          placeholder="Örn: 40"
-          className={inputCls}
-        />
-        <p className="text-[10px] text-muted-foreground mt-1">
-          Ürünün baskı ağırlığı. Maliyet hesaplaması için gereklidir.
-        </p>
+
+        {/* Boyut Listesi */}
+        {hasSizes && (
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Boyutlar
+              </label>
+              <button
+                type="button"
+                onClick={() => setSizes([...sizes, { size_name: "", weight_grams: "" }])}
+                className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold hover:underline flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" /> Boyut Ekle
+              </button>
+            </div>
+
+            {sizes.map((size, idx) => (
+              <div key={idx} className="grid grid-cols-[1fr,120px,auto] gap-2 items-end">
+                <div>
+                  {idx === 0 && <label className="text-[9px] text-muted-foreground mb-1 block">BOYUT ADI</label>}
+                  <input
+                    type="text"
+                    value={size.size_name}
+                    onChange={(e) => {
+                      const next = [...sizes];
+                      next[idx].size_name = e.target.value;
+                      setSizes(next);
+                    }}
+                    placeholder="Örn: 13cm"
+                    className={inputCls + " text-xs"}
+                  />
+                </div>
+                <div>
+                  {idx === 0 && <label className="text-[9px] text-muted-foreground mb-1 block">GRAMAJ (gr)</label>}
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={size.weight_grams}
+                    onChange={(e) => {
+                      const next = [...sizes];
+                      next[idx].weight_grams = e.target.value;
+                      setSizes(next);
+                    }}
+                    placeholder="40"
+                    className={inputCls + " text-xs"}
+                  />
+                </div>
+                <div>
+                  {sizes.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setSizes(sizes.filter((_, i) => i !== idx))}
+                      className="p-2 text-red-500 hover:text-red-600 hover:bg-red-500/10 rounded-lg transition-all"
+                      title="Boyutu kaldır"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Maliyet Önizlemesi */}
-      {costSettings && parseFloat(weightGrams) > 0 && (() => {
-        const w = parseFloat(weightGrams);
-        const calc = calculateProductCost(w, costSettings);
-        return (
-          <div className="bg-gradient-to-br from-blue-50 to-violet-50 dark:from-blue-950/20 dark:to-violet-950/20 rounded-xl border border-blue-200 dark:border-blue-900 p-3 space-y-2">
-            <p className="text-[10px] font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wider">
-              Maliyet Önizlemesi
-            </p>
-            <div className="space-y-1 text-xs">
-              {/* Gramaj bilgileri */}
-              <div className="flex justify-between text-muted-foreground">
-                <span>Ham gramaj:</span>
-                <span className="font-medium text-foreground">{w.toFixed(1)} gr</span>
+      {costSettings && (
+        <>
+          {!hasSizes && parseFloat(weightGrams) > 0 && (() => {
+            const w = parseFloat(weightGrams);
+            const calc = calculateProductCost(w, costSettings);
+            return (
+              <div className="bg-gradient-to-br from-blue-50 to-violet-50 dark:from-blue-950/20 dark:to-violet-950/20 rounded-xl border border-blue-200 dark:border-blue-900 p-3 space-y-2">
+                <p className="text-[10px] font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wider">
+                  Maliyet Önizlemesi
+                </p>
+                <div className="space-y-1 text-xs">
+                  {/* Gramaj bilgileri */}
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Ham gramaj:</span>
+                    <span className="font-medium text-foreground">{w.toFixed(1)} gr</span>
+                  </div>
+                  {costSettings.waste_enabled && (
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Fire dahil gramaj (%{costSettings.waste_percentage}):</span>
+                      <span className="font-medium text-orange-600 dark:text-orange-400">{calc.weightWithWasteGrams.toFixed(1)} gr</span>
+                    </div>
+                  )}
+                  <div className="h-px bg-blue-200 dark:bg-blue-800 my-1" />
+                  {/* Maliyet kalemleri */}
+                  {calc.breakdown.filter(b => b.enabled).map((b, i) => (
+                    <div key={i} className="flex justify-between text-muted-foreground">
+                      <span>{b.label}:</span>
+                      <span className="font-medium text-foreground">{formatCurrency(b.value)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between font-semibold border-t border-blue-200 dark:border-blue-800 pt-1 mt-1">
+                    <span className="text-foreground">Toplam Maliyet:</span>
+                    <span className="text-blue-600 dark:text-blue-400">{formatCurrency(calc.totalCost)}</span>
+                  </div>
+                </div>
+                {/* Önerilen satış fiyatları */}
+                <div className="grid grid-cols-5 gap-1 pt-1 border-t border-blue-200 dark:border-blue-800">
+                  {[
+                    { label: `%${costSettings.profit_margin_1}`, price: calc.suggestedPrices.margin10 },
+                    { label: `%${costSettings.profit_margin_2}`, price: calc.suggestedPrices.margin20 },
+                    { label: `%${costSettings.profit_margin_3}`, price: calc.suggestedPrices.margin30 },
+                    { label: `%${costSettings.profit_margin_4}`, price: calc.suggestedPrices.margin40 },
+                    { label: `%${costSettings.profit_margin_5}`, price: calc.suggestedPrices.margin50 },
+                  ].map((item, i) => (
+                    <div key={i} className="text-center">
+                      <p className="text-[9px] text-muted-foreground">{item.label}</p>
+                      <p className="text-[11px] font-bold text-foreground">{formatCurrency(item.price)}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
-              {costSettings.waste_enabled && (
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Fire dahil gramaj (%{costSettings.waste_percentage}):</span>
-                  <span className="font-medium text-orange-600 dark:text-orange-400">{calc.weightWithWasteGrams.toFixed(1)} gr</span>
-                </div>
-              )}
-              <div className="h-px bg-blue-200 dark:bg-blue-800 my-1" />
-              {/* Maliyet kalemleri */}
-              {calc.breakdown.filter(b => b.enabled).map((b, i) => (
-                <div key={i} className="flex justify-between text-muted-foreground">
-                  <span>{b.label}:</span>
-                  <span className="font-medium text-foreground">{formatCurrency(b.value)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between font-semibold border-t border-blue-200 dark:border-blue-800 pt-1 mt-1">
-                <span className="text-foreground">Toplam Maliyet:</span>
-                <span className="text-blue-600 dark:text-blue-400">{formatCurrency(calc.totalCost)}</span>
-              </div>
+            );
+          })()}
+
+          {hasSizes && sizes.length > 0 && sizes.every(s => s.weight_grams && parseFloat(s.weight_grams) > 0) && (
+            <div className="bg-gradient-to-br from-blue-50 to-violet-50 dark:from-blue-950/20 dark:to-violet-950/20 rounded-xl border border-blue-200 dark:border-blue-900 p-3 space-y-3">
+              <p className="text-[10px] font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wider">
+                Boyutlara Göre Maliyet Önizlemesi
+              </p>
+              {sizes.map((size, idx) => {
+                const w = parseFloat(size.weight_grams);
+                if (isNaN(w) || w <= 0) return null;
+                const calc = calculateProductCost(w, costSettings);
+                return (
+                  <div key={idx} className="bg-white/50 dark:bg-black/20 rounded-lg p-2 space-y-1">
+                    <p className="text-xs font-bold text-foreground flex items-center gap-1">
+                      <Ruler className="w-3 h-3" />
+                      {size.size_name || `Boyut ${idx + 1}`}
+                    </p>
+                    <div className="text-[10px] space-y-0.5">
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Gramaj:</span>
+                        <span className="font-medium text-foreground">{w.toFixed(1)} gr</span>
+                      </div>
+                      <div className="flex justify-between font-semibold">
+                        <span className="text-foreground">Maliyet:</span>
+                        <span className="text-blue-600 dark:text-blue-400">{formatCurrency(calc.totalCost)}</span>
+                      </div>
+                      <div className="grid grid-cols-5 gap-0.5 pt-0.5 border-t border-blue-200/50 dark:border-blue-800/50">
+                        {[
+                          { label: `%${costSettings.profit_margin_1}`, price: calc.suggestedPrices.margin10 },
+                          { label: `%${costSettings.profit_margin_2}`, price: calc.suggestedPrices.margin20 },
+                          { label: `%${costSettings.profit_margin_3}`, price: calc.suggestedPrices.margin30 },
+                          { label: `%${costSettings.profit_margin_4}`, price: calc.suggestedPrices.margin40 },
+                          { label: `%${costSettings.profit_margin_5}`, price: calc.suggestedPrices.margin50 },
+                        ].map((item, i) => (
+                          <div key={i} className="text-center">
+                            <p className="text-[8px] text-muted-foreground">{item.label}</p>
+                            <p className="text-[10px] font-bold text-foreground">{formatCurrency(item.price)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            {/* Önerilen satış fiyatları */}
-            <div className="grid grid-cols-5 gap-1 pt-1 border-t border-blue-200 dark:border-blue-800">
-              {[
-                { label: `%${costSettings.profit_margin_1}`, price: calc.suggestedPrices.margin10 },
-                { label: `%${costSettings.profit_margin_2}`, price: calc.suggestedPrices.margin20 },
-                { label: `%${costSettings.profit_margin_3}`, price: calc.suggestedPrices.margin30 },
-                { label: `%${costSettings.profit_margin_4}`, price: calc.suggestedPrices.margin40 },
-                { label: `%${costSettings.profit_margin_5}`, price: calc.suggestedPrices.margin50 },
-              ].map((item, i) => (
-                <div key={i} className="text-center">
-                  <p className="text-[9px] text-muted-foreground">{item.label}</p>
-                  <p className="text-[11px] font-bold text-foreground">{formatCurrency(item.price)}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
+          )}
+        </>
+      )}
 
       <div className="flex gap-2 pt-1">
         <button onClick={onCancel} className="flex-1 border border-border text-foreground font-semibold py-2.5 rounded-xl text-sm hover:bg-muted transition-all">
@@ -533,12 +736,17 @@ export function ProductCatalogClient() {
               <div className="p-3">
                 <p className="font-semibold text-sm text-foreground truncate">{p.name}</p>
                 {p.description && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{p.description}</p>}
-                {p.weight_grams > 0 && (
+                {p.has_sizes ? (
+                  <p className="text-xs text-violet-600 dark:text-violet-400 font-medium mt-1 flex items-center gap-1">
+                    <Ruler className="w-3 h-3" />
+                    Farklı boyutlar mevcut
+                  </p>
+                ) : p.weight_grams > 0 ? (
                   <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mt-1 flex items-center gap-1">
                     <Scale className="w-3 h-3" />
                     {p.weight_grams} gr
                   </p>
-                )}
+                ) : null}
                 {/* Mobil butonlar */}
                 <div className="flex gap-2 mt-2 sm:hidden">
                   <button

@@ -26,6 +26,7 @@ interface OverItem {
   produced: number;
   extra: number;
   unit_price: number;
+  size_name?: string | null;
 }
 
 const STATUS_STYLES: Record<OrderStatus, string> = {
@@ -135,7 +136,9 @@ function OverProductionDialog({ items, onClose }: { items: OverItem[]; onClose: 
                 <div className="flex items-center gap-3 px-4 py-3 border-b border-amber-500/15">
                   <ProductThumbSmall name={productName} />
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm text-foreground truncate">{productName}</p>
+                    <p className="font-semibold text-sm text-foreground truncate">
+                      {productItems[0].size_name ? `${productName} (${productItems[0].size_name})` : productName}
+                    </p>
                     <p className="text-xs text-muted-foreground">{productItems.length} renk</p>
                   </div>
                   <p className="text-sm font-bold text-amber-600 shrink-0">{formatCurrency(productExtra)}</p>
@@ -194,7 +197,7 @@ export function BuyerOrdersClient({ buyerId }: { buyerId: string }) {
     const [{ data: buyer }, { data: ordersData }] = await Promise.all([
       sb.from("buyers").select("name").eq("id", buyerId).single(),
       sb.from("orders")
-        .select("id, created_at, total_amount, paid_amount, status, notes, buyer:buyers(id,name), items:order_items(id,product_name,color,quantity,produced_quantity,delivered_quantity,unit_price)")
+        .select("id, created_at, total_amount, paid_amount, status, notes, buyer:buyers(id,name), items:order_items(id,product_name,color,quantity,produced_quantity,delivered_quantity,unit_price,size_name)")
         .eq("buyer_id", buyerId)
         .order("created_at", { ascending: false }),
     ]);
@@ -288,6 +291,7 @@ export function BuyerOrdersClient({ buyerId }: { buyerId: string }) {
         produced: item.produced_quantity || 0,
         extra: (item.produced_quantity || 0) - item.quantity,
         unit_price: item.unit_price || 0,
+        size_name: item.size_name,
       }))
   );
   const totalOverValue = overItems.reduce((s, i) => s + i.extra * i.unit_price, 0);

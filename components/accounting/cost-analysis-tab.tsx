@@ -44,6 +44,7 @@ interface Order {
     quantity: number;
     produced_quantity: number;
     unit_price: number;
+    size_name?: string | null;
   }>;
 }
 
@@ -87,7 +88,7 @@ export function CostAnalysisTab() {
           created_at,
           total_amount,
           buyer:buyers(id, name),
-          items:order_items(id, product_name, quantity, produced_quantity, unit_price)
+          items:order_items(id, product_name, quantity, produced_quantity, unit_price, size_name)
         `)
         .order("created_at", { ascending: false })
         .limit(50);
@@ -616,7 +617,7 @@ export function CostAnalysisTab() {
                             unitCost = filament + electricity + waste + depreciation;
                           }
 
-                          const key = item.product_name;
+                          const key = item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name;
                           if (!productMap.has(key)) {
                             productMap.set(key, { name: key, totalQty: 0, weightGrams: wg, unitPrice: item.unit_price, totalCost: 0 });
                           }
