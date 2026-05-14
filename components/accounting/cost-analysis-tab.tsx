@@ -234,8 +234,8 @@ export function CostAnalysisTab() {
       if (error) throw error;
 
       setAnalysis(savedAnalysis);
-      // Gerçek satış fiyatını sipariş birim fiyatından otomatik doldur
-      const avgUnitPrice = selectedOrder.total_amount / selectedOrder.items.reduce((s, i) => s + i.quantity, 0);
+      // Gerçek satış fiyatını hesapla: Toplam gelir / Toplam üretilen adet
+      const avgUnitPrice = totalRevenue / totalActualQty;
       setActualSalePrice(avgUnitPrice.toFixed(2));
       setSimulatedPrice("");
 
@@ -269,13 +269,27 @@ export function CostAnalysisTab() {
 
   // Gerçek satış analizi
   function calcActualSale() {
-    if (!analysis || !actualSalePrice) return null;
-    const price = parseFloat(actualSalePrice);
-    if (isNaN(price) || price <= 0) return null;
+    if (!analysis) return null;
+    
+    // Eğer kullanıcı manuel fiyat girdiyse onu kullan
+    if (actualSalePrice) {
+      const price = parseFloat(actualSalePrice);
+      if (!isNaN(price) && price > 0) {
+        const costPerUnit = analysis.total_production_cost / analysis.total_quantity;
+        const profit = price - costPerUnit;
+        const markupPct = (profit / costPerUnit) * 100;
+        const totalRevenue = price * analysis.total_quantity;
+        const totalProfit = totalRevenue - analysis.total_production_cost;
+        return { price, costPerUnit, profit, markupPct, totalRevenue, totalProfit };
+      }
+    }
+    
+    // Kullanıcı fiyat girmediyse, gerçek geliri kullan
     const costPerUnit = analysis.total_production_cost / analysis.total_quantity;
+    const price = analysis.total_revenue / analysis.total_quantity;
     const profit = price - costPerUnit;
     const markupPct = (profit / costPerUnit) * 100;
-    const totalRevenue = price * analysis.total_quantity;
+    const totalRevenue = analysis.total_revenue; // Gerçek gelir (yuvarlama hatası yok)
     const totalProfit = totalRevenue - analysis.total_production_cost;
     return { price, costPerUnit, profit, markupPct, totalRevenue, totalProfit };
   }
