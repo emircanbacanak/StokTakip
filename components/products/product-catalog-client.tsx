@@ -711,11 +711,17 @@ export function ProductCatalogClient() {
           {filteredProducts.map((p) => (
             <div key={p.id} className="bg-card rounded-2xl border border-border overflow-hidden hover:border-blue-500/30 hover:shadow-md hover:shadow-blue-500/5 transition-all group">
               {/* Image area */}
-              <div className="relative h-32 bg-muted flex items-center justify-center overflow-hidden">
+              <div className="relative h-40 bg-muted overflow-hidden">
                 {p.image_url ? (
-                  <img src={p.image_url} alt={p.name} className="w-full h-full object-contain p-2" />
+                  <img 
+                    src={p.image_url} 
+                    alt={p.name} 
+                    className="w-full h-full object-contain"
+                  />
                 ) : (
-                  <Package className="w-10 h-10 text-muted-foreground/30" />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Package className="w-10 h-10 text-muted-foreground/30" />
+                  </div>
                 )}
                 {/* Actions overlay - sadece desktop hover'da */}
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:flex items-center justify-center gap-2">
