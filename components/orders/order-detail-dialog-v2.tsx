@@ -81,6 +81,14 @@ type DeliveryWithItems = Delivery & {
   payment?: Payment;
 };
 
+// Ürün adını boyut bilgisi ile birlikte formatla
+function formatProductName(item: OrderItem): string {
+  if (item.size_name) {
+    return `${item.product_name} (${item.size_name})`;
+  }
+  return item.product_name;
+}
+
 function ItemsTab({ items, totalDelivered, totalOrdered, updateProduction }: {
   items: OrderItem[]; totalDelivered: number; totalOrdered: number;
   updateProduction: (id: string, qty: number, max: number) => void;
@@ -97,14 +105,6 @@ function ItemsTab({ items, totalDelivered, totalOrdered, updateProduction }: {
   function handleUpdateProduction(id: string, qty: number, max: number, productName: string) {
     setLastUpdated(productName);
     updateProduction(id, qty, max);
-  }
-
-  // Ürün adını boyut bilgisi ile birlikte formatla
-  function formatProductName(item: OrderItem): string {
-    if (item.size_name) {
-      return `${item.product_name} (${item.size_name})`;
-    }
-    return item.product_name;
   }
 
   // Teslim Edilenler: Gerçekten teslimat yapılmış (delivered_quantity > 0)
