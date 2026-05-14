@@ -49,7 +49,16 @@ interface Order {
 }
 
 interface ProductWithWeight {
+  id: string;
   name: string;
+  weight_grams: number;
+  has_sizes: boolean;
+}
+
+interface ProductSize {
+  id: string;
+  product_id: string;
+  size_name: string;
   weight_grams: number;
 }
 
@@ -61,6 +70,7 @@ export function CostAnalysisTab() {
   
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<ProductWithWeight[]>([]);
+  const [productSizes, setProductSizes] = useState<ProductSize[]>([]);
   const [settings, setSettings] = useState<CostSettings | null>(null);
   
   const [selectedOrderId, setSelectedOrderId] = useState<string>("");
@@ -99,10 +109,18 @@ export function CostAnalysisTab() {
       // Ürünleri yükle
       const { data: productsData, error: productsError } = await supabase
         .from("products")
-        .select("name, weight_grams");
+        .select("id, name, weight_grams, has_sizes");
 
       if (productsError) throw productsError;
       setProducts(productsData);
+
+      // Ürün boyutlarını yükle
+      const { data: sizesData, error: sizesError } = await supabase
+        .from("product_sizes")
+        .select("id, product_id, size_name, weight_grams");
+
+      if (sizesError) throw sizesError;
+      setProductSizes(sizesData || []);
 
       // Ayarları yükle
       const { data: settingsData, error: settingsError } = await supabase
@@ -146,12 +164,25 @@ export function CostAnalysisTab() {
 
       for (const item of selectedOrder.items) {
         const product = products.find((p) => p.name === item.product_name);
-        const weightGrams = product?.weight_grams || 0;
+        
+        // Gramaj bulma: Boyutlu ürünse size_name'den, değilse product'tan
+        let weightGrams = 0;
+        if (item.size_name && product) {
+          // Boyutlu ürün - product_sizes tablosundan gramaj al
+          const productSize = productSizes.find(
+            (ps) => ps.product_id === product.id && ps.size_name === item.size_name
+          );
+          weightGrams = productSize?.weight_grams || 0;
+        } else {
+          // Boyutsuz ürün - products tablosundan gramaj al
+          weightGrams = product?.weight_grams || 0;
+        }
 
         if (weightGrams === 0) {
+          const displayName = item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name;
           toast({
             title: "Uyarı",
-            description: `"${item.product_name}" ürününün gramajı tanımlı değil`,
+            description: `"${displayName}" ürününün gramajı tanımlı değil`,
             variant: "destructive",
           });
           continue;
@@ -603,7 +634,20 @@ export function CostAnalysisTab() {
 
                         selectedOrder.items.forEach(item => {
                           const product = products.find(p => p.name === item.product_name);
-                          const wg = product?.weight_grams || 0;
+                          
+                          // Gramaj bulma: Boyutlu ürünse size_name'den, değilse product'tan
+                          let wg = 0;
+                          if (item.size_name && product) {
+                            // Boyutlu ürün - product_sizes tablosundan gramaj al
+                            const productSize = productSizes.find(
+                              (ps) => ps.product_id === product.id && ps.size_name === item.size_name
+                            );
+                            wg = productSize?.weight_grams || 0;
+                          } else {
+                            // Boyutsuz ürün - products tablosundan gramaj al
+                            wg = product?.weight_grams || 0;
+                          }
+                          
                           const actualQty = Math.max(item.produced_quantity || 0, item.quantity);
                           const wWithWaste = settings ? (settings.waste_enabled ? wg * (1 + settings.waste_percentage / 100) : wg) : wg;
 
