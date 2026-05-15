@@ -17,6 +17,8 @@ interface Item {
   product_id?: string; // Boyut kontrolü için
   size_id?: string | null;
   size_name?: string | null;
+  includes_candle?: boolean; // Mum dahil mi?
+  is_candleholder?: boolean; // Ürün mumluk mu?
 }
 
 const inputCls = "w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all";
@@ -45,7 +47,7 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
       sb.from("buyers").select("*").order("name").then(({ data }) => { if (data) setBuyers(data); });
       
       // Ürünleri ve boyutlarını yükle
-      sb.from("products").select("id, name, has_sizes").order("name").then(async ({ data }) => { 
+      sb.from("products").select("id, name, has_sizes, is_candleholder, is_keychain").order("name").then(async ({ data }) => { 
         if (data) {
           const productsWithSizes = await Promise.all(
             data.map(async (p) => {
@@ -139,6 +141,8 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
         product_id: product?.id,
         size_id: null,
         size_name: null,
+        is_candleholder: product?.is_candleholder || false,
+        includes_candle: product?.is_candleholder ? true : undefined, // Mumluk ise varsayılan true
       };
       setItems(next);
     }
@@ -238,6 +242,7 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
         delivered_quantity: 0,
         size_id: item.size_id || null,
         size_name: item.size_name || null,
+        includes_candle: item.includes_candle !== undefined ? item.includes_candle : true, // Varsayılan true
       }))
     );
 
@@ -322,9 +327,34 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
                           className={inputCls}
                         >
                           <option value="">Ürün seçin...</option>
-                          {catalogProducts.map((p) => (
-                            <option key={p.id} value={p.name}>{p.name}</option>
-                          ))}
+                          
+                          {/* Mumluklar */}
+                          {catalogProducts.some(p => p.is_candleholder) && (
+                            <optgroup label="🕯️ Mumluklar">
+                              {catalogProducts.filter(p => p.is_candleholder).map((p) => (
+                                <option key={p.id} value={p.name}>{p.name}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                          
+                          {/* Anahtarlıklar */}
+                          {catalogProducts.some(p => p.is_keychain) && (
+                            <optgroup label="🔑 Anahtarlıklar">
+                              {catalogProducts.filter(p => p.is_keychain).map((p) => (
+                                <option key={p.id} value={p.name}>{p.name}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                          
+                          {/* Vazolar (mumluk ve anahtarlık olmayanlar) */}
+                          {catalogProducts.some(p => !p.is_candleholder && !p.is_keychain) && (
+                            <optgroup label="🏺 Vazolar">
+                              {catalogProducts.filter(p => !p.is_candleholder && !p.is_keychain).map((p) => (
+                                <option key={p.id} value={p.name}>{p.name}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                          
                           <option value="__custom__">— Manuel gir</option>
                         </select>
                       ) : (
@@ -398,6 +428,36 @@ export function NewOrderDialog({ open, onClose, onSuccess }: { open: boolean; on
                     }
                     return null;
                   })()}
+
+                  {/* Mum Dahil mi? (Mumluk ürünleri için) */}
+                  {item.is_candleholder && (
+                    <div className="bg-amber-50 dark:bg-amber-950/20 rounded-lg p-3 border border-amber-200 dark:border-amber-900">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={item.includes_candle !== false}
+                          onChange={(e) => {
+                            const next = [...items];
+                            next[itemIdx] = {
+                              ...next[itemIdx],
+                              includes_candle: e.target.checked,
+                            };
+                            setItems(next);
+                          }}
+                          className="w-4 h-4 rounded border-border text-amber-500 focus:ring-2 focus:ring-amber-500/50"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-base">🕯️</span>
+                            <span className="text-xs font-semibold text-foreground">Mum dahil mi?</span>
+                          </div>
+                          <p className="text-[9px] text-muted-foreground mt-0.5">
+                            İşaretlenirse mumluk ücreti hesaplamaya dahil edilir
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  )}
 
                   {/* Renkler */}
                   <div>

@@ -17,6 +17,7 @@ import { ColorBadge } from "@/components/ui/color-badge";
 
 function ProductThumb({ name }: { name: string }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [isCandleholder, setIsCandleholder] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const ref = useRef<HTMLDivElement>(null);
@@ -24,8 +25,13 @@ function ProductThumb({ name }: { name: string }) {
   useEffect(() => {
     let cancelled = false;
     const sb = createClient();
-    sb.from("products").select("image_url").eq("name", name).maybeSingle().then(({ data }) => {
-      if (!cancelled && data?.image_url) setUrl(data.image_url);
+    // Boyut bilgisini kaldır (örn: "Vazo (13cm)" → "Vazo")
+    const productName = name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    sb.from("products").select("image_url, is_candleholder").eq("name", productName).maybeSingle().then(({ data }) => {
+      if (!cancelled && data) {
+        if (data.image_url) setUrl(data.image_url);
+        setIsCandleholder(data.is_candleholder || false);
+      }
     });
     return () => { cancelled = true; };
   }, [name]);
@@ -42,16 +48,30 @@ function ProductThumb({ name }: { name: string }) {
   }
 
   if (!url) return (
-    <div className="w-14 h-14 rounded-2xl bg-muted/60 flex items-center justify-center shrink-0 border border-border">
-      <Package className="w-5 h-5 text-muted-foreground/30" />
+    <div className="relative">
+      <div className="w-14 h-14 rounded-2xl bg-muted/60 flex items-center justify-center shrink-0 border border-border">
+        <Package className="w-5 h-5 text-muted-foreground/30" />
+      </div>
+      {isCandleholder && (
+        <div className="absolute -top-1 -right-1 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center text-xs shadow-sm" title="Mumluk">
+          🕯️
+        </div>
+      )}
     </div>
   );
 
   return (
     <>
-      <div ref={ref} className="w-14 h-14 rounded-2xl overflow-hidden shrink-0 cursor-zoom-in bg-muted border border-border flex items-center justify-center"
-        onMouseEnter={handleMouseEnter} onMouseLeave={() => setHovered(false)}>
-        <img src={url} alt={name} className="max-w-full max-h-full object-contain p-1" />
+      <div className="relative">
+        <div ref={ref} className="w-14 h-14 rounded-2xl overflow-hidden shrink-0 cursor-zoom-in bg-muted border border-border flex items-center justify-center"
+          onMouseEnter={handleMouseEnter} onMouseLeave={() => setHovered(false)}>
+          <img src={url} alt={name} className="max-w-full max-h-full object-contain p-1" />
+        </div>
+        {isCandleholder && (
+          <div className="absolute -top-1 -right-1 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center text-xs shadow-sm" title="Mumluk">
+            🕯️
+          </div>
+        )}
       </div>
       {hovered && (
         <div className="fixed z-[200] pointer-events-none w-80 h-80 rounded-2xl overflow-hidden shadow-2xl border border-border bg-muted flex items-center justify-center"

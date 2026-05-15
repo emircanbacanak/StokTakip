@@ -21,6 +21,9 @@ async function removeBackground(file: File): Promise<string> {
       format: "image/png",
       quality: 0.9,
     },
+    progress: (key, current, total) => {
+      // Sessiz mod - progress loglarını gösterme
+    },
   });
   // Convert to base64 so it can be used as img src without blob: restrictions
   return new Promise((resolve) => {
@@ -64,6 +67,8 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
     initial?.weight_grams ? String(initial.weight_grams) : ""
   );
   const [hasSizes, setHasSizes] = useState(initial?.has_sizes ?? false);
+  const [isCandleholder, setIsCandleholder] = useState(initial?.is_candleholder ?? false);
+  const [isKeychain, setIsKeychain] = useState(initial?.is_keychain ?? false);
   const [sizes, setSizes] = useState<Array<{ id?: string; size_name: string; weight_grams: string }>>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(initial?.image_url ?? null);
   const [originalImage, setOriginalImage] = useState<string | null>(null);
@@ -72,8 +77,48 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [removingBg, setRemovingBg] = useState(false);
   const [saving, setSaving] = useState(false);
   const [costSettings, setCostSettings] = useState<CostSettings | null>(null);
+  const [manualCandleholderOverride, setManualCandleholderOverride] = useState(false);
+  const [manualKeychainOverride, setManualKeychainOverride] = useState(false);
+  const [manualSizeOverride, setManualSizeOverride] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  // Ürün adı değiştiğinde otomatik algılama
+  useEffect(() => {
+    if (!name.trim()) return;
+
+    const nameLower = name.toLowerCase();
+    
+    // Mumluk otomatik algılama - sadece yeni ürün eklerken
+    if (!initial && !manualCandleholderOverride) {
+      const isCandleholderName = nameLower.includes('mumluk') || nameLower.includes('candleholder');
+      if (isCandleholderName !== isCandleholder) {
+        setIsCandleholder(isCandleholderName);
+      }
+    }
+
+    // Anahtarlık otomatik algılama - sadece yeni ürün eklerken
+    if (!initial && !manualKeychainOverride) {
+      const isKeychainName = nameLower.includes('anahtarlık') || nameLower.includes('keychain') || nameLower.includes('key chain');
+      if (isKeychainName !== isKeychain) {
+        setIsKeychain(isKeychainName);
+      }
+    }
+
+    // Vazo otomatik algılama - sadece yeni ürün eklerken ve manuel değişiklik yapılmadıysa
+    if (!initial && !manualSizeOverride) {
+      const isVase = nameLower.includes('vazo') || nameLower.includes('vase');
+      if (isVase && !hasSizes) {
+        setHasSizes(true);
+        // Varsayılan boyutları ekle
+        setSizes([
+          { size_name: '13cm', weight_grams: '' },
+          { size_name: '15cm', weight_grams: '' },
+          { size_name: '17cm', weight_grams: '' }
+        ]);
+      }
+    }
+  }, [name, isCandleholder, isKeychain, hasSizes, manualCandleholderOverride, manualKeychainOverride, manualSizeOverride, initial]);
 
   // Mevcut boyutları yükle
   useEffect(() => {
@@ -193,6 +238,8 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       image_url: imageUrl,
       weight_grams: hasSizes ? 0 : finalWeight, // Boyutlu ürünlerde weight_grams kullanılmaz
       has_sizes: hasSizes,
+      is_candleholder: isCandleholder,
+      is_keychain: isKeychain,
     };
 
     let dbError: any = null;
@@ -369,9 +416,16 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
             type="checkbox"
             checked={hasSizes}
             onChange={(e) => {
-              setHasSizes(e.target.checked);
-              if (e.target.checked && sizes.length === 0) {
-                setSizes([{ size_name: "", weight_grams: "" }]);
+              const checked = e.target.checked;
+              setHasSizes(checked);
+              setManualSizeOverride(true);
+              if (checked && sizes.length === 0) {
+                // Varsayılan boyutları ekle
+                setSizes([
+                  { size_name: '13cm', weight_grams: '' },
+                  { size_name: '15cm', weight_grams: '' },
+                  { size_name: '17cm', weight_grams: '' }
+                ]);
               }
             }}
             className="w-4 h-4 rounded border-border text-blue-500 focus:ring-2 focus:ring-blue-500/50"
@@ -453,12 +507,60 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
         )}
       </div>
 
+      {/* Mumluk Özelliği */}
+      <div className="bg-amber-50 dark:bg-amber-950/20 rounded-xl p-3 border border-amber-200 dark:border-amber-900">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isCandleholder}
+            onChange={(e) => {
+              setIsCandleholder(e.target.checked);
+              setManualCandleholderOverride(true);
+            }}
+            className="w-4 h-4 rounded border-border text-amber-500 focus:ring-2 focus:ring-amber-500/50"
+          />
+          <div className="flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="text-lg">🕯️</span>
+              <span className="text-sm font-semibold text-foreground">Mum kullanılıyor mu?</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Bu ürün mumluk ise işaretleyin. Maliyet hesaplamasına mumluk ücreti eklenecektir.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      {/* Anahtarlık Özelliği */}
+      <div className="bg-blue-50 dark:bg-blue-950/20 rounded-xl p-3 border border-blue-200 dark:border-blue-900">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isKeychain}
+            onChange={(e) => {
+              setIsKeychain(e.target.checked);
+              setManualKeychainOverride(true);
+            }}
+            className="w-4 h-4 rounded border-border text-blue-500 focus:ring-2 focus:ring-blue-500/50"
+          />
+          <div className="flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="text-lg">🔑</span>
+              <span className="text-sm font-semibold text-foreground">Zincir kullanılıyor mu?</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Bu ürün anahtarlık ise işaretleyin. Maliyet hesaplamasına zincir ücreti eklenecektir.
+            </p>
+          </div>
+        </label>
+      </div>
+
       {/* Maliyet Önizlemesi */}
       {costSettings && (
         <>
           {!hasSizes && parseFloat(weightGrams) > 0 && (() => {
             const w = parseFloat(weightGrams);
-            const calc = calculateProductCost(w, costSettings);
+            const calc = calculateProductCost(w, costSettings, isCandleholder, isKeychain);
             return (
               <div className="bg-gradient-to-br from-blue-50 to-violet-50 dark:from-blue-950/20 dark:to-violet-950/20 rounded-xl border border-blue-200 dark:border-blue-900 p-3 space-y-2">
                 <p className="text-[10px] font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wider">
@@ -516,7 +618,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
               {sizes.map((size, idx) => {
                 const w = parseFloat(size.weight_grams);
                 if (isNaN(w) || w <= 0) return null;
-                const calc = calculateProductCost(w, costSettings);
+                const calc = calculateProductCost(w, costSettings, isCandleholder, isKeychain);
                 return (
                   <div key={idx} className="bg-white/50 dark:bg-black/20 rounded-lg p-2 space-y-1">
                     <p className="text-xs font-bold text-foreground flex items-center gap-1">
@@ -573,6 +675,7 @@ export function ProductCatalogClient() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [filter, setFilter] = useState<"all" | "no-image">("all");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "candleholder" | "keychain" | "vase">("all");
   const { toast } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const topRef = useRef<HTMLDivElement>(null);
@@ -620,17 +723,81 @@ export function ProductCatalogClient() {
   }
 
   // Filtreleme
-  const filteredProducts = filter === "no-image" 
+  let filteredProducts = filter === "no-image" 
     ? products.filter(p => !p.image_url)
     : products;
   
+  // Kategori filtreleme
+  if (categoryFilter === "candleholder") {
+    filteredProducts = filteredProducts.filter(p => p.is_candleholder);
+  } else if (categoryFilter === "keychain") {
+    filteredProducts = filteredProducts.filter(p => p.is_keychain);
+  } else if (categoryFilter === "vase") {
+    filteredProducts = filteredProducts.filter(p => !p.is_candleholder && !p.is_keychain);
+  }
+  
   const noImageCount = products.filter(p => !p.image_url).length;
+  const candleholderCount = products.filter(p => p.is_candleholder).length;
+  const keychainCount = products.filter(p => p.is_keychain).length;
+  const vaseCount = products.filter(p => !p.is_candleholder && !p.is_keychain).length;
 
   return (
     <div className="space-y-4">
       <div ref={topRef} className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <p className="text-sm text-muted-foreground">{filteredProducts.length} ürün</p>
+          
+          {/* Kategori Filtreleri */}
+          <div className="flex gap-1">
+            <button
+              onClick={() => setCategoryFilter("all")}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                categoryFilter === "all"
+                  ? "bg-gradient-to-r from-blue-500 to-violet-600 text-white shadow-sm"
+                  : "bg-muted text-muted-foreground hover:bg-muted/70"
+              }`}
+            >
+              Tümü ({products.length})
+            </button>
+            {candleholderCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("candleholder")}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  categoryFilter === "candleholder"
+                    ? "bg-amber-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🕯️ Mumluklar ({candleholderCount})
+              </button>
+            )}
+            {keychainCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("keychain")}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  categoryFilter === "keychain"
+                    ? "bg-violet-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🔑 Anahtarlıklar ({keychainCount})
+              </button>
+            )}
+            {vaseCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("vase")}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  categoryFilter === "vase"
+                    ? "bg-emerald-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🏺 Vazolar ({vaseCount})
+              </button>
+            )}
+          </div>
+          
+          {/* Resim Filtresi */}
           {noImageCount > 0 && (
             <div className="flex gap-1">
               <button

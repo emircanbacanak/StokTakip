@@ -17,6 +17,8 @@ export type Database = {
           image_url: string | null;
           weight_grams: number;
           has_sizes: boolean;
+          is_candleholder: boolean;
+          is_keychain: boolean;
           created_at: string;
         };
         Insert: {
@@ -26,6 +28,8 @@ export type Database = {
           image_url?: string | null;
           weight_grams?: number;
           has_sizes?: boolean;
+          is_candleholder?: boolean;
+          is_keychain?: boolean;
           created_at?: string;
         };
         Update: {
@@ -35,6 +39,8 @@ export type Database = {
           image_url?: string | null;
           weight_grams?: number;
           has_sizes?: boolean;
+          is_candleholder?: boolean;
+          is_keychain?: boolean;
           created_at?: string;
         };
         Relationships: [];
@@ -85,6 +91,10 @@ export type Database = {
           waste_enabled: boolean;
           depreciation_cost_per_gram: number;
           depreciation_enabled: boolean;
+          candleholder_cost_per_unit: number;
+          candleholder_enabled: boolean;
+          keychain_cost_per_unit: number;
+          keychain_enabled: boolean;
           profit_margin_1: number;
           profit_margin_2: number;
           profit_margin_3: number;
@@ -104,6 +114,10 @@ export type Database = {
           waste_enabled?: boolean;
           depreciation_cost_per_gram?: number;
           depreciation_enabled?: boolean;
+          candleholder_cost_per_unit?: number;
+          candleholder_enabled?: boolean;
+          keychain_cost_per_unit?: number;
+          keychain_enabled?: boolean;
           profit_margin_1?: number;
           profit_margin_2?: number;
           profit_margin_3?: number;
@@ -123,6 +137,10 @@ export type Database = {
           waste_enabled?: boolean;
           depreciation_cost_per_gram?: number;
           depreciation_enabled?: boolean;
+          candleholder_cost_per_unit?: number;
+          candleholder_enabled?: boolean;
+          keychain_cost_per_unit?: number;
+          keychain_enabled?: boolean;
           profit_margin_1?: number;
           profit_margin_2?: number;
           profit_margin_3?: number;
@@ -373,6 +391,7 @@ export type Database = {
           unit_price: number;
           size_id: string | null;
           size_name: string | null;
+          includes_candle: boolean;
           created_at: string;
         };
         Insert: {
@@ -386,6 +405,7 @@ export type Database = {
           unit_price: number;
           size_id?: string | null;
           size_name?: string | null;
+          includes_candle?: boolean;
           created_at?: string;
         };
         Update: {
@@ -399,6 +419,7 @@ export type Database = {
           unit_price?: number;
           size_id?: string | null;
           size_name?: string | null;
+          includes_candle?: boolean;
         };
         Relationships: [
           {

@@ -32,7 +32,8 @@ export default function InvoicePage() {
             produced_quantity,
             delivered_quantity,
             unit_price,
-            size_name
+            size_name,
+            product:products!order_items_product_name_fkey(is_candleholder)
           )
         `)
         .eq("id", orderId)
@@ -76,9 +77,12 @@ export default function InvoicePage() {
     total: number;
   }> = [];
 
-  // Boyut bilgisini ürün adına ekle
+  // Boyut ve mumluk bilgisini ürün adına ekle
   const formatProductName = (item: any) => {
-    return item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name;
+    let name = item.product_name;
+    if (item.size_name) name += ` (${item.size_name})`;
+    if (item.product?.is_candleholder) name += " 🕯️";
+    return name;
   };
 
   if (mode === "all") {

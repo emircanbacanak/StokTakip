@@ -46,6 +46,12 @@ export function CostSettingsDialog({
   const [depreciationCost, setDepreciationCost] = useState(DEFAULT_COST_SETTINGS.depreciation_cost_per_gram);
   const [depreciationEnabled, setDepreciationEnabled] = useState(DEFAULT_COST_SETTINGS.depreciation_enabled);
   
+  const [candleholderCost, setCandleholderCost] = useState(DEFAULT_COST_SETTINGS.candleholder_cost_per_unit);
+  const [candleholderEnabled, setCandleholderEnabled] = useState(DEFAULT_COST_SETTINGS.candleholder_enabled);
+  
+  const [keychainCost, setKeychainCost] = useState(DEFAULT_COST_SETTINGS.keychain_cost_per_unit);
+  const [keychainEnabled, setKeychainEnabled] = useState(DEFAULT_COST_SETTINGS.keychain_enabled);
+  
   const [profitMargin1, setProfitMargin1] = useState(DEFAULT_COST_SETTINGS.profit_margin_1);
   const [profitMargin2, setProfitMargin2] = useState(DEFAULT_COST_SETTINGS.profit_margin_2);
   const [profitMargin3, setProfitMargin3] = useState(DEFAULT_COST_SETTINGS.profit_margin_3);
@@ -82,6 +88,10 @@ export function CostSettingsDialog({
         setWasteEnabled(data.waste_enabled);
         setDepreciationCost(data.depreciation_cost_per_gram);
         setDepreciationEnabled(data.depreciation_enabled);
+        setCandleholderCost(data.candleholder_cost_per_unit);
+        setCandleholderEnabled(data.candleholder_enabled);
+        setKeychainCost(data.keychain_cost_per_unit);
+        setKeychainEnabled(data.keychain_enabled);
         setProfitMargin1(data.profit_margin_1);
         setProfitMargin2(data.profit_margin_2);
         setProfitMargin3(data.profit_margin_3);
@@ -115,6 +125,10 @@ export function CostSettingsDialog({
         waste_enabled: wasteEnabled,
         depreciation_cost_per_gram: depreciationCost,
         depreciation_enabled: depreciationEnabled,
+        candleholder_cost_per_unit: candleholderCost,
+        candleholder_enabled: candleholderEnabled,
+        keychain_cost_per_unit: keychainCost,
+        keychain_enabled: keychainEnabled,
         profit_margin_1: profitMargin1,
         profit_margin_2: profitMargin2,
         profit_margin_3: profitMargin3,
@@ -159,6 +173,10 @@ export function CostSettingsDialog({
     setWasteEnabled(DEFAULT_COST_SETTINGS.waste_enabled);
     setDepreciationCost(DEFAULT_COST_SETTINGS.depreciation_cost_per_gram);
     setDepreciationEnabled(DEFAULT_COST_SETTINGS.depreciation_enabled);
+    setCandleholderCost(DEFAULT_COST_SETTINGS.candleholder_cost_per_unit);
+    setCandleholderEnabled(DEFAULT_COST_SETTINGS.candleholder_enabled);
+    setKeychainCost(DEFAULT_COST_SETTINGS.keychain_cost_per_unit);
+    setKeychainEnabled(DEFAULT_COST_SETTINGS.keychain_enabled);
     setProfitMargin1(DEFAULT_COST_SETTINGS.profit_margin_1);
     setProfitMargin2(DEFAULT_COST_SETTINGS.profit_margin_2);
     setProfitMargin3(DEFAULT_COST_SETTINGS.profit_margin_3);
@@ -306,6 +324,68 @@ export function CostSettingsDialog({
                   value={depreciationCost}
                   onChange={(e) => setDepreciationCost(parseFloat(e.target.value) || 0)}
                   disabled={!depreciationEnabled}
+                />
+              </div>
+            </div>
+
+            {/* Mumluk Ücreti */}
+            <div className="space-y-3 p-4 bg-muted/30 rounded-lg border border-border">
+              <div className="flex items-center justify-between">
+                <Label className="text-base font-semibold">Mumluk Ücreti</Label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={candleholderEnabled}
+                    onChange={(e) => setCandleholderEnabled(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm text-muted-foreground">Aktif</span>
+                </label>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="candleholder-cost" className="text-sm text-muted-foreground">
+                  TL/adet (Mumluk özelliği olan ürünler için eklenen sabit maliyet)
+                </Label>
+                <Input
+                  id="candleholder-cost"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="999999.99"
+                  value={candleholderCost}
+                  onChange={(e) => setCandleholderCost(parseFloat(e.target.value) || 0)}
+                  disabled={!candleholderEnabled}
+                />
+              </div>
+            </div>
+
+            {/* Anahtarlık/Zincir Ücreti */}
+            <div className="space-y-3 p-4 bg-muted/30 rounded-lg border border-border">
+              <div className="flex items-center justify-between">
+                <Label className="text-base font-semibold">Anahtarlık Zincir Ücreti</Label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={keychainEnabled}
+                    onChange={(e) => setKeychainEnabled(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm text-muted-foreground">Aktif</span>
+                </label>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="keychain-cost" className="text-sm text-muted-foreground">
+                  TL/adet (Anahtarlık özelliği olan ürünler için eklenen zincir maliyeti)
+                </Label>
+                <Input
+                  id="keychain-cost"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="999999.99"
+                  value={keychainCost}
+                  onChange={(e) => setKeychainCost(parseFloat(e.target.value) || 0)}
+                  disabled={!keychainEnabled}
                 />
               </div>
             </div>

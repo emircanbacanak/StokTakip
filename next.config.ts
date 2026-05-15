@@ -15,8 +15,16 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     config.resolve.fallback = { ...config.resolve.fallback, fs: false };
+    
+    // WebAssembly uyarılarını bastır
+    if (!isServer) {
+      config.infrastructureLogging = {
+        level: 'error',
+      };
+    }
+    
     return config;
   },
 };

@@ -45,6 +45,7 @@ interface Order {
     produced_quantity: number;
     unit_price: number;
     size_name?: string | null;
+    includes_candle?: boolean;
   }>;
 }
 
@@ -53,6 +54,8 @@ interface ProductWithWeight {
   name: string;
   weight_grams: number;
   has_sizes: boolean;
+  is_candleholder: boolean;
+  is_keychain: boolean;
 }
 
 interface ProductSize {
@@ -76,6 +79,10 @@ export function CostAnalysisTab() {
   const [selectedOrderId, setSelectedOrderId] = useState<string>("");
   const [targetProfitMargin, setTargetProfitMargin] = useState<number>(30);
   const [analysis, setAnalysis] = useState<OrderCostAnalysis | null>(null);
+  const [totalCandleholder, setTotalCandleholder] = useState<number>(0); // Mumluk ücreti toplam
+  const [totalKeychain, setTotalKeychain] = useState<number>(0); // Anahtarlık zincir ücreti toplam
+  const [candleholderCount, setCandleholderCount] = useState<number>(0); // Mumluk adedi
+  const [keychainCount, setKeychainCount] = useState<number>(0); // Anahtarlık adedi
 
   // Satış fiyatı simülatörü state'leri
   const [actualSalePrice, setActualSalePrice] = useState<string>("");       // Gerçek sattığım birim fiyat
@@ -98,7 +105,7 @@ export function CostAnalysisTab() {
           created_at,
           total_amount,
           buyer:buyers(id, name),
-          items:order_items(id, product_name, quantity, produced_quantity, unit_price, size_name)
+          items:order_items(id, product_name, quantity, produced_quantity, unit_price, size_name, includes_candle)
         `)
         .order("created_at", { ascending: false })
         .limit(50);
@@ -106,13 +113,20 @@ export function CostAnalysisTab() {
       if (ordersError) throw ordersError;
       setOrders(ordersData as any);
 
-      // Ürünleri yükle
+      // Ürünleri yükle (mumluk ve anahtarlık bilgisi dahil)
       const { data: productsData, error: productsError } = await supabase
         .from("products")
-        .select("id, name, weight_grams, has_sizes");
+        .select("id, name, weight_grams, has_sizes, is_candleholder, is_keychain");
 
       if (productsError) throw productsError;
-      setProducts(productsData);
+      
+      console.log('🔍 Yüklenen Ürünler (ilk 3):', productsData?.slice(0, 3).map(p => ({
+        name: p.name,
+        is_candleholder: p.is_candleholder,
+        is_keychain: p.is_keychain,
+      })));
+      
+      setProducts(productsData as any);
 
       // Ürün boyutlarını yükle
       const { data: sizesData, error: sizesError } = await supabase
@@ -130,6 +144,14 @@ export function CostAnalysisTab() {
         .single();
 
       if (settingsError) throw settingsError;
+      
+      console.log('🔍 Yüklenen Ayarlar:', {
+        candleholder_enabled: settingsData?.candleholder_enabled,
+        candleholder_cost: settingsData?.candleholder_cost_per_unit,
+        keychain_enabled: settingsData?.keychain_enabled,
+        keychain_cost: settingsData?.keychain_cost_per_unit,
+      });
+      
       setSettings(settingsData);
     } catch (error) {
       console.error("Veri yüklenirken hata:", error);
@@ -161,25 +183,31 @@ export function CostAnalysisTab() {
       let totalElectricity = 0;
       let totalWaste = 0;
       let totalDepreciation = 0;
+      let totalCandleholder = 0; // Mumluk ücreti
+      let totalKeychain = 0; // Anahtarlık zincir ücreti
+      let candleholderQty = 0; // Mumluk adedi
+      let keychainQty = 0; // Anahtarlık adedi
 
       for (const item of selectedOrder.items) {
-        const product = products.find((p) => p.name === item.product_name);
+        // Ürün adından boyut bilgisini temizle (örn: "Kafes Vazo (13cm)" → "Kafes Vazo")
+        const cleanProductName = item.product_name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+        const product = products.find((p) => p.name === cleanProductName);
         
         // Gramaj bulma: Boyutlu ürünse size_name'den, değilse product'tan
         let weightGrams = 0;
-        if (item.size_name && product) {
+        if (product?.has_sizes && item.size_name) {
           // Boyutlu ürün - product_sizes tablosundan gramaj al
           const productSize = productSizes.find(
             (ps) => ps.product_id === product.id && ps.size_name === item.size_name
           );
           weightGrams = productSize?.weight_grams || 0;
-        } else {
+        } else if (product && !product.has_sizes) {
           // Boyutsuz ürün - products tablosundan gramaj al
-          weightGrams = product?.weight_grams || 0;
+          weightGrams = product.weight_grams || 0;
         }
 
         if (weightGrams === 0) {
-          const displayName = item.size_name ? `${item.product_name} (${item.size_name})` : item.product_name;
+          const displayName = item.size_name ? `${cleanProductName} (${item.size_name})` : cleanProductName;
           toast({
             title: "Uyarı",
             description: `"${displayName}" ürününün gramajı tanımlı değil`,
@@ -218,9 +246,27 @@ export function CostAnalysisTab() {
         if (settings.depreciation_enabled) {
           totalDepreciation += itemWeightWithWaste * settings.depreciation_cost_per_gram;
         }
+
+        // Mumluk ücreti: ürün mumluk ise VE mum dahil ise VE ayar aktifse
+        if (product?.is_candleholder && item.includes_candle !== false && settings.candleholder_enabled) {
+          totalCandleholder += actualQty * settings.candleholder_cost_per_unit;
+          candleholderQty += actualQty;
+        }
+
+        // Anahtarlık zincir ücreti: ürün anahtarlık ise ve ayar aktifse
+        if (product?.is_keychain && settings.keychain_enabled) {
+          totalKeychain += actualQty * settings.keychain_cost_per_unit;
+          keychainQty += actualQty;
+        }
       }
 
-      const totalCost = totalFilament + totalElectricity + totalWaste + totalDepreciation;
+      console.log('💰 Toplam Maliyetler:', {
+        totalCandleholder,
+        totalKeychain,
+        totalCost: totalFilament + totalElectricity + totalWaste + totalDepreciation + totalCandleholder + totalKeychain
+      });
+
+      const totalCost = totalFilament + totalElectricity + totalWaste + totalDepreciation + totalCandleholder + totalKeychain;
       // Gerçek gelir = sipariş tutarı + fazla üretim değeri
       const overProductionValue = selectedOrder.items.reduce((sum, item) => {
         const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
@@ -266,6 +312,10 @@ export function CostAnalysisTab() {
       if (error) throw error;
 
       setAnalysis(savedAnalysis);
+      setTotalCandleholder(totalCandleholder); // Mumluk ücretini state'e kaydet
+      setTotalKeychain(totalKeychain); // Anahtarlık zincir ücretini state'e kaydet
+      setCandleholderCount(candleholderQty); // Mumluk adetini state'e kaydet
+      setKeychainCount(keychainQty); // Anahtarlık adetini state'e kaydet
       // Gerçek satış fiyatını hesapla: Toplam gelir / Toplam üretilen adet
       const avgUnitPrice = totalRevenue / totalActualQty;
       setActualSalePrice(avgUnitPrice.toFixed(2));
@@ -550,7 +600,7 @@ export function CostAnalysisTab() {
               {/* Maliyet Dökümü */}
               <div className="bg-card rounded-xl shadow-sm border border-border p-6">
                 <h3 className="text-lg font-semibold text-foreground mb-4">Maliyet Dökümü</h3>
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <Flame className="w-4 h-4 text-orange-500" />
@@ -583,6 +633,28 @@ export function CostAnalysisTab() {
                     <p className="text-xl font-bold text-foreground">{formatCurrency(analysis.total_depreciation_cost)}</p>
                     <p className="text-xs text-muted-foreground">{((analysis.total_depreciation_cost / analysis.total_production_cost) * 100).toFixed(1)}% toplam maliyetin</p>
                   </div>
+                  {settings && settings.candleholder_enabled && totalCandleholder > 0 && (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🕯️</span>
+                        <span className="text-sm text-muted-foreground">Mumluk</span>
+                      </div>
+                      <p className="text-xl font-bold text-foreground">{formatCurrency(totalCandleholder)}</p>
+                      <p className="text-xs text-muted-foreground">{candleholderCount} adet × {formatCurrency(settings.candleholder_cost_per_unit)}</p>
+                      <p className="text-xs text-muted-foreground">{((totalCandleholder / analysis.total_production_cost) * 100).toFixed(1)}% toplam maliyetin</p>
+                    </div>
+                  )}
+                  {settings && settings.keychain_enabled && totalKeychain > 0 && (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🔑</span>
+                        <span className="text-sm text-muted-foreground">Zincir</span>
+                      </div>
+                      <p className="text-xl font-bold text-foreground">{formatCurrency(totalKeychain)}</p>
+                      <p className="text-xs text-muted-foreground">{keychainCount} adet × {formatCurrency(settings.keychain_cost_per_unit)}</p>
+                      <p className="text-xs text-muted-foreground">{((totalKeychain / analysis.total_production_cost) * 100).toFixed(1)}% toplam maliyetin</p>
+                    </div>
+                  )}
                 </div>
                 <div className="mt-4 pt-4 border-t border-border flex items-center justify-between flex-wrap gap-2">
                   <div>
@@ -633,19 +705,21 @@ export function CostAnalysisTab() {
                         if (!selectedOrder) return null;
 
                         selectedOrder.items.forEach(item => {
-                          const product = products.find(p => p.name === item.product_name);
+                          // Ürün adından boyut bilgisini temizle (örn: "Kafes Vazo (13cm)" → "Kafes Vazo")
+                          const cleanProductName = item.product_name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+                          const product = products.find(p => p.name === cleanProductName);
                           
                           // Gramaj bulma: Boyutlu ürünse size_name'den, değilse product'tan
                           let wg = 0;
-                          if (item.size_name && product) {
+                          if (product?.has_sizes && item.size_name) {
                             // Boyutlu ürün - product_sizes tablosundan gramaj al
                             const productSize = productSizes.find(
                               (ps) => ps.product_id === product.id && ps.size_name === item.size_name
                             );
                             wg = productSize?.weight_grams || 0;
-                          } else {
+                          } else if (product && !product.has_sizes) {
                             // Boyutsuz ürün - products tablosundan gramaj al
-                            wg = product?.weight_grams || 0;
+                            wg = product.weight_grams || 0;
                           }
                           
                           const actualQty = Math.max(item.produced_quantity || 0, item.quantity);

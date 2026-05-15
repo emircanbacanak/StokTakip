@@ -12,6 +12,7 @@ interface PItem {
   quantity: number; produced_quantity: number; order_id: string;
   order: { id: string; created_at: string; buyer: { name: string } };
   size_name?: string | null;
+  product?: { is_candleholder: boolean } | null;
 }
 
 function ProductThumb({ name }: { name: string }) {
@@ -23,7 +24,9 @@ function ProductThumb({ name }: { name: string }) {
   useEffect(() => {
     let cancelled = false;
     const sb = createClient();
-    sb.from("products").select("image_url").eq("name", name).maybeSingle().then(({ data }) => {
+    // Boyut bilgisini kaldır (örn: "Vazo (13cm)" → "Vazo")
+    const productName = name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    sb.from("products").select("image_url").eq("name", productName).maybeSingle().then(({ data }) => {
       if (!cancelled && data?.image_url) setUrl(data.image_url);
     });
     return () => { cancelled = true; };
@@ -72,11 +75,35 @@ export function ProductionClient() {
 
   const load = useCallback(async () => {
     let sb; try { sb = createClient(); } catch { setLoading(false); return; }
-    const { data } = await sb
+    
+    // Order items'ları al
+    const { data: orderItemsData } = await sb
       .from("order_items")
       .select("id, product_name, color, quantity, produced_quantity, order_id, size_name, order:orders(id, created_at, buyer:buyers(name))")
       .order("product_name");
-    const incomplete = ((data as unknown as PItem[]) || []).filter((i) => i.produced_quantity < i.quantity);
+    
+    if (!orderItemsData) {
+      setLoading(false);
+      return;
+    }
+    
+    // Ürün bilgilerini al (mumluk kontrolü için)
+    const productNames = [...new Set(orderItemsData.map(item => item.product_name))];
+    const { data: productsData } = await sb
+      .from("products")
+      .select("name, is_candleholder")
+      .in("name", productNames);
+    
+    // Ürün bilgilerini map'e çevir
+    const productsMap = new Map(productsData?.map(p => [p.name, p]) || []);
+    
+    // Order items'lara ürün bilgisini ekle
+    const itemsWithProducts = orderItemsData.map(item => ({
+      ...item,
+      product: productsMap.get(item.product_name) || { is_candleholder: false }
+    }));
+    
+    const incomplete = ((itemsWithProducts as unknown as PItem[]) || []).filter((i) => i.produced_quantity < i.quantity);
     setItems(incomplete);
     setLoading(false);
   }, []);
@@ -235,7 +262,12 @@ export function ProductionClient() {
                             <ProductThumb name={product.productName} />
                             <div className="flex-1 min-w-0 text-left">
                               <div className="flex items-center justify-between gap-2 mb-1.5">
-                                <p className="font-semibold text-sm text-foreground truncate">{product.productName}</p>
+                                <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                  <p className="font-semibold text-sm text-foreground truncate">{product.productName}</p>
+                                  {product.items[0]?.product?.is_candleholder && (
+                                    <span className="text-xs shrink-0" title="Mumluk">🕯️</span>
+                                  )}
+                                </div>
                                 <span className="text-xs text-muted-foreground shrink-0">
                                   {product.items.length} renk
                                 </span>

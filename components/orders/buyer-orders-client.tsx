@@ -48,7 +48,9 @@ function ProductThumbSmall({ name }: { name: string }) {
   useEffect(() => {
     let cancelled = false;
     const sb = createClient();
-    sb.from("products").select("image_url").eq("name", name).maybeSingle().then(({ data }) => {
+    // Boyut bilgisini kaldır (örn: "Vazo (13cm)" → "Vazo")
+    const productName = name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    sb.from("products").select("image_url").eq("name", productName).maybeSingle().then(({ data }) => {
       if (!cancelled && data && (data as { image_url: string | null }).image_url)
         setUrl((data as { image_url: string }).image_url);
     });
@@ -72,7 +74,9 @@ function ProductThumb({ name }: { name: string }) {
   useEffect(() => {
     let cancelled = false;
     const sb = createClient();
-    sb.from("products").select("image_url").eq("name", name).maybeSingle().then(({ data }) => {
+    // Boyut bilgisini kaldır (örn: "Vazo (13cm)" → "Vazo")
+    const productName = name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    sb.from("products").select("image_url").eq("name", productName).maybeSingle().then(({ data }) => {
       if (!cancelled && data && (data as { image_url: string | null }).image_url)
         setUrl((data as { image_url: string }).image_url);
     });
@@ -197,7 +201,7 @@ export function BuyerOrdersClient({ buyerId }: { buyerId: string }) {
     const [{ data: buyer }, { data: ordersData }] = await Promise.all([
       sb.from("buyers").select("name").eq("id", buyerId).single(),
       sb.from("orders")
-        .select("id, created_at, total_amount, paid_amount, status, notes, buyer:buyers(id,name), items:order_items(id,product_name,color,quantity,produced_quantity,delivered_quantity,unit_price,size_name)")
+        .select("id, created_at, total_amount, paid_amount, status, notes, buyer:buyers(id,name), items:order_items(id,product_name,color,quantity,produced_quantity,delivered_quantity,unit_price,size_name,includes_candle)")
         .eq("buyer_id", buyerId)
         .order("created_at", { ascending: false }),
     ]);

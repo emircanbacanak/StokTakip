@@ -69,20 +69,14 @@ export interface OrderCostAnalysisResult {
 }
 
 /**
- * Fiyatı 0 veya 5'e yuvarlar
+ * Fiyatı 5'e yuvarlar (daha net fiyatlandırma)
+ * Örnek: 27.30 → 30, 32.50 → 35, 38.00 → 40
  */
 export function roundToNearest5(price: number): number {
   if (price <= 0) return 0;
-  let rounded = Math.round(price);
-  const lastDigit = rounded % 10;
-  if (lastDigit === 1 || lastDigit === 2) {
-    rounded = Math.floor(rounded / 10) * 10;
-  } else if (lastDigit === 3 || lastDigit === 4 || lastDigit === 6 || lastDigit === 7) {
-    rounded = Math.floor(rounded / 10) * 10 + 5;
-  } else if (lastDigit === 8 || lastDigit === 9) {
-    rounded = Math.ceil(rounded / 10) * 10;
-  }
-  return rounded;
+  
+  // 5'e yuvarla
+  return Math.ceil(price / 5) * 5;
 }
 
 /**
@@ -94,7 +88,9 @@ export function roundToNearest5(price: number): number {
  */
 export function calculateProductCost(
   weightGrams: number,
-  settings: CostSettings
+  settings: CostSettings,
+  isCandleholder: boolean = false,
+  isKeychain: boolean = false
 ): CostCalculationResult {
   // Fire dahil gramaj = gerçekte harcanan toplam filament
   // 40 gr ürün + %10 fire = 44 gr filament harcanır
@@ -120,8 +116,18 @@ export function calculateProductCost(
     ? weightWithWaste * settings.depreciation_cost_per_gram
     : 0;
 
+  // Mumluk maliyeti: ürün mumluk ise ve ayar aktifse
+  const candleholderCost = (isCandleholder && settings.candleholder_enabled)
+    ? settings.candleholder_cost_per_unit
+    : 0;
+
+  // Anahtarlık maliyeti: ürün anahtarlık ise ve ayar aktifse
+  const keychainCost = (isKeychain && settings.keychain_enabled)
+    ? settings.keychain_cost_per_unit
+    : 0;
+
   // Toplam maliyet (fire ayrı kalem yok — zaten filament içinde)
-  const totalCost = rawFilamentCost + electricityCost + depreciationCost;
+  const totalCost = rawFilamentCost + electricityCost + depreciationCost + candleholderCost + keychainCost;
 
   // Önerilen satış fiyatları (kar marjlı)
   let price10 = totalCost * (1 + settings.profit_margin_1 / 100);
@@ -139,6 +145,34 @@ export function calculateProductCost(
     price50 = roundToNearest5(price50);
   }
 
+  const breakdown = [
+    {
+      label: `Filament Gideri (${weightWithWaste.toFixed(1)} gr × ${settings.filament_price_per_kg} TL/kg)`,
+      value: rawFilamentCost,
+      enabled: settings.filament_enabled,
+    },
+    {
+      label: `Elektrik (${weightWithWaste.toFixed(1)} gr × ${settings.electricity_cost_per_gram} TL/gr)`,
+      value: electricityCost,
+      enabled: settings.electricity_enabled,
+    },
+    {
+      label: `Yıpranma (${weightWithWaste.toFixed(1)} gr × ${settings.depreciation_cost_per_gram} TL/gr)`,
+      value: depreciationCost,
+      enabled: settings.depreciation_enabled,
+    },
+    {
+      label: `Mumluk Ücreti (${settings.candleholder_cost_per_unit} TL/adet)`,
+      value: candleholderCost,
+      enabled: isCandleholder && settings.candleholder_enabled,
+    },
+    {
+      label: `Zincir Ücreti (${settings.keychain_cost_per_unit} TL/adet)`,
+      value: keychainCost,
+      enabled: isKeychain && settings.keychain_enabled,
+    },
+  ];
+
   return {
     rawFilamentCost,
     electricityCost,
@@ -154,23 +188,7 @@ export function calculateProductCost(
       margin40: price40,
       margin50: price50,
     },
-    breakdown: [
-      {
-        label: `Filament Gideri (${weightWithWaste.toFixed(1)} gr × ${settings.filament_price_per_kg} TL/kg)`,
-        value: rawFilamentCost,
-        enabled: settings.filament_enabled,
-      },
-      {
-        label: `Elektrik (${weightWithWaste.toFixed(1)} gr × ${settings.electricity_cost_per_gram} TL/gr)`,
-        value: electricityCost,
-        enabled: settings.electricity_enabled,
-      },
-      {
-        label: `Yıpranma (${weightWithWaste.toFixed(1)} gr × ${settings.depreciation_cost_per_gram} TL/gr)`,
-        value: depreciationCost,
-        enabled: settings.depreciation_enabled,
-      },
-    ],
+    breakdown,
   };
 }
 
@@ -324,6 +342,10 @@ export const DEFAULT_COST_SETTINGS: Omit<CostSettings, "id" | "updated_at" | "up
   waste_enabled: true,
   depreciation_cost_per_gram: 0.05,
   depreciation_enabled: true,
+  candleholder_cost_per_unit: 0,
+  candleholder_enabled: false,
+  keychain_cost_per_unit: 2.0,
+  keychain_enabled: true,
   profit_margin_1: 10.0,
   profit_margin_2: 20.0,
   profit_margin_3: 30.0,
