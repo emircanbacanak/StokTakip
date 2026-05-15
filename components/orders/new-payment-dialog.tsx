@@ -41,16 +41,10 @@ export function NewPaymentDialog({
   const willOverpay = amountNum > remainingDebt && remainingDebt > 0;
   const overpayAmount = amountNum - remainingDebt;
 
-  // Teslim edilen ürünlerin toplam değeri (fazla üretim dahil)
+  // Teslim edilen ürünlerin toplam değeri
   const deliveredValue = order.items.reduce((sum, item) => {
     const deliveredQty = item.delivered_quantity || 0;
-    const baseValue = deliveredQty * item.unit_price;
-    
-    // Fazla üretim değeri
-    const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
-    const overValue = overProduced * item.unit_price;
-    
-    return sum + baseValue + overValue;
+    return sum + (deliveredQty * item.unit_price);
   }, 0);
 
   // Teslim edilen ürünler için alınması gereken ödeme
