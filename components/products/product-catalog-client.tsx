@@ -12,25 +12,22 @@ import { formatCurrency } from "@/lib/utils";
 const inputCls =
   "w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all";
 
-async function removeBackground(file: File): Promise<string> {
-  // Dynamic import to avoid SSR issues
-  const { removeBackground } = await import("@imgly/background-removal");
-  const blob = await removeBackground(file, {
-    model: "isnet_fp16", // En kaliteli model (isnet_fp16 > isnet > isnet_quint8)
-    output: {
-      format: "image/png",
-      quality: 0.9,
-    },
-    progress: (key, current, total) => {
-      // Sessiz mod - progress loglarını gösterme
-    },
+async function removeBackgroundWithAPI(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append('image', file);
+
+  const response = await fetch('/api/remove-bg', {
+    method: 'POST',
+    body: formData,
   });
-  // Convert to base64 so it can be used as img src without blob: restrictions
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.readAsDataURL(blob);
-  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Background removal failed');
+  }
+
+  const data = await response.json();
+  return data.imageUrl;
 }
 
 async function uploadProductImage(
@@ -41,17 +38,34 @@ async function uploadProductImage(
   // Convert blob URL or data URL to blob
   const res = await fetch(dataUrl);
   const blob = await res.blob();
-  const ext = blob.type === "image/png" ? "png" : "jpg";
+  
+  // PNG formatını koru (arkaplan kaldırılmış resimler için önemli)
+  const isPng = blob.type === "image/png" || dataUrl.startsWith("data:image/png");
+  const ext = isPng ? "png" : "jpg";
   const path = `products/${productId}.${ext}`;
+
+  console.log('Upload ediliyor:', { path, size: blob.size, type: blob.type, isPng });
 
   const { error } = await supabase.storage
     .from("product-images")
-    .upload(path, blob, { upsert: true, contentType: blob.type });
+    .upload(path, blob, { 
+      upsert: true, 
+      contentType: isPng ? "image/png" : blob.type,
+      cacheControl: '0' // Cache'i devre dışı bırak
+    });
 
-  if (error) return null;
+  if (error) {
+    console.error("Resim yükleme hatası:", error);
+    return null;
+  }
 
   const { data } = supabase.storage.from("product-images").getPublicUrl(path);
-  return data.publicUrl;
+  
+  // Cache busting için timestamp ekle
+  const urlWithCacheBust = `${data.publicUrl}?t=${Date.now()}`;
+  console.log('Upload başarılı:', urlWithCacheBust);
+  
+  return urlWithCacheBust;
 }
 
 interface ProductFormProps {
@@ -71,7 +85,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [isKeychain, setIsKeychain] = useState(initial?.is_keychain ?? false);
   const [sizes, setSizes] = useState<Array<{ id?: string; size_name: string; weight_grams: string }>>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(initial?.image_url ?? null);
-  const [originalImage, setOriginalImage] = useState<string | null>(null);
+  const [originalImage, setOriginalImage] = useState<string | null>(initial?.image_url ?? null);
   const [removedBgImage, setRemovedBgImage] = useState<string | null>(null);
   const [useOriginal, setUseOriginal] = useState(true);
   const [removingBg, setRemovingBg] = useState(false);
@@ -165,19 +179,29 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   async function handleRemoveBackground() {
     if (!originalImage) return;
     setRemovingBg(true);
+    
+    // UI'ın güncellenmesi için kısa bir gecikme
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
     try {
       // Orijinal dosyayı al
       const res = await fetch(originalImage);
       const blob = await res.blob();
       const file = new File([blob], "image.jpg", { type: blob.type });
       
-      const result = await removeBackground(file);
+      // Yeni API'yi kullan
+      const result = await removeBackgroundWithAPI(file);
       setRemovedBgImage(result);
       setImagePreview(result);
       setUseOriginal(false);
       toast({ title: "Arkaplan kaldırıldı ✓" });
-    } catch {
-      toast({ title: "Arkaplan kaldırılamadı", variant: "destructive" });
+    } catch (error) {
+      console.error("Arkaplan kaldırma hatası:", error);
+      toast({ 
+        title: "Arkaplan kaldırılamadı", 
+        description: error instanceof Error ? error.message : "Bilinmeyen hata",
+        variant: "destructive" 
+      });
     } finally {
       setRemovingBg(false);
     }
@@ -222,10 +246,54 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
     const id = initial?.id ?? crypto.randomUUID();
     let imageUrl = initial?.image_url ?? null;
 
-    if (imagePreview && imagePreview !== initial?.image_url) {
-      const uploaded = await uploadProductImage(sb, imagePreview, id);
-      if (uploaded) imageUrl = uploaded;
-      else imageUrl = imagePreview;
+    // Hangi resmin kullanılacağını belirle
+    const imageToSave = useOriginal ? originalImage : removedBgImage;
+    
+    console.log('Save işlemi:', {
+      useOriginal,
+      hasOriginalImage: !!originalImage,
+      hasRemovedBgImage: !!removedBgImage,
+      imageToSaveType: imageToSave?.startsWith('data:image/png') ? 'PNG' : imageToSave?.startsWith('data:image/') ? 'Other' : 'URL',
+      imageToSave: imageToSave?.substring(0, 50) + '...',
+      initialImageUrl: initial?.image_url?.substring(0, 50) + '...'
+    });
+    
+    // Eğer yeni bir resim seçilmişse veya mevcut resim değiştirilmişse kaydet
+    if (imageToSave && imageToSave !== initial?.image_url) {
+      console.log('Yeni resim yükleniyor...', {
+        isPng: imageToSave.startsWith('data:image/png'),
+        isDataUrl: imageToSave.startsWith('data:')
+      });
+      
+      // Eski resmi sil (format değişiyorsa)
+      if (initial?.image_url && imageToSave.startsWith('data:image/png')) {
+        try {
+          const oldPath = initial.image_url.split('/').pop()?.split('?')[0]; // Query string'i temizle
+          if (oldPath) {
+            await sb.storage.from("product-images").remove([`products/${oldPath}`]);
+            console.log('Eski resim silindi:', oldPath);
+          }
+        } catch (e) {
+          console.log('Eski resim silinemedi (sorun değil):', e);
+        }
+      }
+      
+      const uploaded = await uploadProductImage(sb, imageToSave, id);
+      if (uploaded) {
+        // Timestamp'i database'e kaydetmeden önce temizle
+        imageUrl = uploaded.split('?')[0];
+      } else {
+        imageUrl = imageToSave;
+      }
+      console.log('Resim yüklendi:', imageUrl);
+    } else if (!imageToSave && !originalImage && !removedBgImage && imagePreview === null) {
+      // Resim tamamen silinmişse null yap
+      console.log('Resim silindi');
+      imageUrl = null;
+    } else if (imageToSave === initial?.image_url) {
+      // Mevcut resim değiştirilmemişse olduğu gibi bırak
+      console.log('Mevcut resim korunuyor');
+      imageUrl = initial?.image_url ?? null;
     }
 
     // Gramaj: boyutsuz ürünler için
@@ -309,24 +377,41 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
         </label>
         <div
           onClick={() => !removingBg && fileRef.current?.click()}
-          className="relative w-full h-40 rounded-xl border-2 border-dashed border-border hover:border-blue-500/50 transition-all cursor-pointer flex items-center justify-center overflow-hidden bg-muted/30"
+          className={`relative w-full h-40 rounded-xl border-2 border-dashed border-border hover:border-blue-500/50 transition-all ${removingBg ? 'cursor-wait' : 'cursor-pointer'} flex items-center justify-center overflow-hidden bg-muted/30`}
         >
-          {removingBg ? (
-            <div className="flex flex-col items-center gap-2 text-muted-foreground">
-              <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
-              <span className="text-xs font-medium">Arkaplan kaldırılıyor...</span>
-            </div>
-          ) : imagePreview ? (
+          {imagePreview && !removingBg && (
             <>
               <img src={imagePreview} alt="preview" className="relative max-h-36 max-w-full object-contain" />
               <button
-                onClick={(e) => { e.stopPropagation(); setImagePreview(null); setOriginalImage(null); setRemovedBgImage(null); }}
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  setImagePreview(null); 
+                  setOriginalImage(null); 
+                  setRemovedBgImage(null);
+                  setUseOriginal(true);
+                  if (fileRef.current) fileRef.current.value = '';
+                }}
                 className="absolute top-2 right-2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white hover:bg-red-600 transition-colors"
               >
                 <X className="w-3 h-3" />
               </button>
             </>
-          ) : (
+          )}
+          {removingBg && (
+            <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3 z-10">
+              <div className="relative">
+                <Loader2 className="w-8 h-8 animate-spin text-violet-500" />
+                <div className="absolute inset-0 w-8 h-8 animate-ping text-violet-500/30">
+                  <Loader2 className="w-8 h-8" />
+                </div>
+              </div>
+              <div className="text-center">
+                <span className="text-sm font-semibold text-foreground block">Arkaplan kaldırılıyor...</span>
+                <span className="text-xs text-muted-foreground">Diğer alanları düzenleyebilirsiniz</span>
+              </div>
+            </div>
+          )}
+          {!imagePreview && !removingBg && (
             <div className="flex flex-col items-center gap-2 text-muted-foreground">
               <ImageIcon className="w-8 h-8 opacity-40" />
               <span className="text-xs font-medium">Resim seç veya sürükle</span>
@@ -661,7 +746,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
         <button onClick={onCancel} className="flex-1 border border-border text-foreground font-semibold py-2.5 rounded-xl text-sm hover:bg-muted transition-all">
           İptal
         </button>
-        <button onClick={save} disabled={saving || removingBg} className="flex-1 bg-gradient-to-r from-blue-500 to-violet-600 text-white font-semibold py-2.5 rounded-xl text-sm shadow-lg shadow-blue-500/25 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+        <button onClick={save} disabled={saving} className="flex-1 bg-gradient-to-r from-blue-500 to-violet-600 text-white font-semibold py-2.5 rounded-xl text-sm shadow-lg shadow-blue-500/25 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
           {saving ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Kaydediliyor...</> : <><Check className="w-3.5 h-3.5" /> Kaydet</>}
         </button>
       </div>
@@ -687,7 +772,12 @@ export function ProductCatalogClient() {
     if (error) {
       console.error("Ürünler yüklenirken hata:", error);
     }
-    setProducts(data ?? []);
+    // Resimlere cache busting ekle
+    const productsWithCacheBust = (data ?? []).map(p => ({
+      ...p,
+      image_url: p.image_url ? `${p.image_url}?t=${Date.now()}` : null
+    }));
+    setProducts(productsWithCacheBust);
     setLoading(false);
   }, []);
 
