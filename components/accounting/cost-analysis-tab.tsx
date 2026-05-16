@@ -56,6 +56,7 @@ interface ProductWithWeight {
   has_sizes: boolean;
   is_candleholder: boolean;
   is_keychain: boolean;
+  is_soapdish: boolean;
 }
 
 interface ProductSize {
@@ -81,8 +82,10 @@ export function CostAnalysisTab() {
   const [analysis, setAnalysis] = useState<OrderCostAnalysis | null>(null);
   const [totalCandleholder, setTotalCandleholder] = useState<number>(0); // Mumluk ücreti toplam
   const [totalKeychain, setTotalKeychain] = useState<number>(0); // Anahtarlık zincir ücreti toplam
+  const [totalSoapdish, setTotalSoapdish] = useState<number>(0); // Sabunluk pompası ücreti toplam
   const [candleholderCount, setCandleholderCount] = useState<number>(0); // Mumluk adedi
   const [keychainCount, setKeychainCount] = useState<number>(0); // Anahtarlık adedi
+  const [soapdishCount, setSoapdishCount] = useState<number>(0); // Sabunluk adedi
 
   // Satış fiyatı simülatörü state'leri
   const [actualSalePrice, setActualSalePrice] = useState<string>("");       // Gerçek sattığım birim fiyat
@@ -113,10 +116,10 @@ export function CostAnalysisTab() {
       if (ordersError) throw ordersError;
       setOrders(ordersData as any);
 
-      // Ürünleri yükle (mumluk ve anahtarlık bilgisi dahil)
+      // Ürünleri yükle (mumluk, anahtarlık ve sabunluk bilgisi dahil)
       const { data: productsData, error: productsError } = await supabase
         .from("products")
-        .select("id, name, weight_grams, has_sizes, is_candleholder, is_keychain");
+        .select("id, name, weight_grams, has_sizes, is_candleholder, is_keychain, is_soapdish");
 
       if (productsError) throw productsError;
       
@@ -124,6 +127,7 @@ export function CostAnalysisTab() {
         name: p.name,
         is_candleholder: p.is_candleholder,
         is_keychain: p.is_keychain,
+        is_soapdish: p.is_soapdish,
       })));
       
       setProducts(productsData as any);
@@ -185,8 +189,10 @@ export function CostAnalysisTab() {
       let totalDepreciation = 0;
       let totalCandleholder = 0; // Mumluk ücreti
       let totalKeychain = 0; // Anahtarlık zincir ücreti
+      let totalSoapdish = 0; // Sabunluk pompası ücreti
       let candleholderQty = 0; // Mumluk adedi
       let keychainQty = 0; // Anahtarlık adedi
+      let soapdishQty = 0; // Sabunluk adedi
 
       for (const item of selectedOrder.items) {
         // Ürün adından boyut bilgisini temizle (örn: "Kafes Vazo (13cm)" → "Kafes Vazo")
@@ -258,15 +264,22 @@ export function CostAnalysisTab() {
           totalKeychain += actualQty * settings.keychain_cost_per_unit;
           keychainQty += actualQty;
         }
+
+        // Sabunluk pompası ücreti: ürün sabunluk ise ve ayar aktifse
+        if (product?.is_soapdish && settings.soapdish_enabled) {
+          totalSoapdish += actualQty * settings.soapdish_cost_per_unit;
+          soapdishQty += actualQty;
+        }
       }
 
       console.log('💰 Toplam Maliyetler:', {
         totalCandleholder,
         totalKeychain,
-        totalCost: totalFilament + totalElectricity + totalWaste + totalDepreciation + totalCandleholder + totalKeychain
+        totalSoapdish,
+        totalCost: totalFilament + totalElectricity + totalWaste + totalDepreciation + totalCandleholder + totalKeychain + totalSoapdish
       });
 
-      const totalCost = totalFilament + totalElectricity + totalWaste + totalDepreciation + totalCandleholder + totalKeychain;
+      const totalCost = totalFilament + totalElectricity + totalWaste + totalDepreciation + totalCandleholder + totalKeychain + totalSoapdish;
       // Gerçek gelir = sipariş tutarı + fazla üretim değeri
       const overProductionValue = selectedOrder.items.reduce((sum, item) => {
         const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
@@ -314,8 +327,10 @@ export function CostAnalysisTab() {
       setAnalysis(savedAnalysis);
       setTotalCandleholder(totalCandleholder); // Mumluk ücretini state'e kaydet
       setTotalKeychain(totalKeychain); // Anahtarlık zincir ücretini state'e kaydet
+      setTotalSoapdish(totalSoapdish); // Sabunluk pompası ücretini state'e kaydet
       setCandleholderCount(candleholderQty); // Mumluk adetini state'e kaydet
       setKeychainCount(keychainQty); // Anahtarlık adetini state'e kaydet
+      setSoapdishCount(soapdishQty); // Sabunluk adetini state'e kaydet
       // Gerçek satış fiyatını hesapla: Toplam gelir / Toplam üretilen adet
       const avgUnitPrice = totalRevenue / totalActualQty;
       setActualSalePrice(avgUnitPrice.toFixed(2));
@@ -653,6 +668,17 @@ export function CostAnalysisTab() {
                       <p className="text-xl font-bold text-foreground">{formatCurrency(totalKeychain)}</p>
                       <p className="text-xs text-muted-foreground">{keychainCount} adet × {formatCurrency(settings.keychain_cost_per_unit)}</p>
                       <p className="text-xs text-muted-foreground">{((totalKeychain / analysis.total_production_cost) * 100).toFixed(1)}% toplam maliyetin</p>
+                    </div>
+                  )}
+                  {settings && settings.soapdish_enabled && totalSoapdish > 0 && (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🧼</span>
+                        <span className="text-sm text-muted-foreground">Pompa</span>
+                      </div>
+                      <p className="text-xl font-bold text-foreground">{formatCurrency(totalSoapdish)}</p>
+                      <p className="text-xs text-muted-foreground">{soapdishCount} adet × {formatCurrency(settings.soapdish_cost_per_unit)}</p>
+                      <p className="text-xs text-muted-foreground">{((totalSoapdish / analysis.total_production_cost) * 100).toFixed(1)}% toplam maliyetin</p>
                     </div>
                   )}
                 </div>

@@ -83,7 +83,16 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [hasSizes, setHasSizes] = useState(initial?.has_sizes ?? false);
   const [isCandleholder, setIsCandleholder] = useState(initial?.is_candleholder ?? false);
   const [isKeychain, setIsKeychain] = useState(initial?.is_keychain ?? false);
-  const [isSoapdish, setIsSoapdish] = useState(initial?.is_soapdish ?? false); // Migration sonrası çalışacak
+  const [isSoapdish, setIsSoapdish] = useState(initial?.is_soapdish ?? false);
+  const [isSolidSoapDish, setIsSolidSoapDish] = useState(initial?.is_solid_soap_dish ?? false);
+  const [isSugarBowl, setIsSugarBowl] = useState(initial?.is_sugar_bowl ?? false);
+  const [isSnackBowl, setIsSnackBowl] = useState(initial?.is_snack_bowl ?? false);
+  const [isFruitBowl, setIsFruitBowl] = useState(initial?.is_fruit_bowl ?? false);
+  const [isContainer, setIsContainer] = useState(initial?.is_container ?? false);
+  const [isStrainer, setIsStrainer] = useState(initial?.is_strainer ?? false);
+  const [isSpiceHolder, setIsSpiceHolder] = useState(initial?.is_spice_holder ?? false);
+  const [isTowelHolder, setIsTowelHolder] = useState(initial?.is_towel_holder ?? false);
+  const [isBrushHolder, setIsBrushHolder] = useState(initial?.is_brush_holder ?? false);
   const [sizes, setSizes] = useState<Array<{ id?: string; size_name: string; weight_grams: string }>>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(initial?.image_url ?? null);
   const [originalImage, setOriginalImage] = useState<string | null>(initial?.image_url ?? null);
@@ -95,6 +104,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [manualCandleholderOverride, setManualCandleholderOverride] = useState(false);
   const [manualKeychainOverride, setManualKeychainOverride] = useState(false);
   const [manualSoapdishOverride, setManualSoapdishOverride] = useState(false);
+  const [manualSolidSoapDishOverride, setManualSolidSoapDishOverride] = useState(false);
   const [manualSizeOverride, setManualSizeOverride] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -122,11 +132,54 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
     }
 
     // Sabunluk otomatik algılama - sadece yeni ürün eklerken
-    if (!initial && !manualSoapdishOverride) {
-      const isSoapdishName = nameLower.includes('sabunluk') || nameLower.includes('soap dish') || nameLower.includes('soapdish');
-      if (isSoapdishName !== isSoapdish) {
-        setIsSoapdish(isSoapdishName);
+    if (!initial && !manualSoapdishOverride && !manualSolidSoapDishOverride) {
+      const hasSoapdishInName = nameLower.includes('sabunluk') || nameLower.includes('soap dish') || nameLower.includes('soapdish');
+      
+      if (hasSoapdishInName) {
+        // Adında sabunluk geçiyorsa, varsayılan olarak sıvı sabunluk (pompalı) yap
+        if (!isSoapdish && !isSolidSoapDish) {
+          setIsSoapdish(true);
+        }
+      } else {
+        // Adında sabunluk geçmiyorsa, her iki işareti de kaldır
+        if (isSoapdish) setIsSoapdish(false);
+        if (isSolidSoapDish) setIsSolidSoapDish(false);
       }
+    }
+
+    // Yeni kategoriler için otomatik algılama - sadece yeni ürün eklerken
+    if (!initial) {
+      // Şekerlik
+      const hasSugarBowl = nameLower.includes('şekerlik') || nameLower.includes('sugar bowl');
+      if (hasSugarBowl !== isSugarBowl) setIsSugarBowl(hasSugarBowl);
+      
+      // Çerezlik
+      const hasSnackBowl = nameLower.includes('çerezlik') || nameLower.includes('snack bowl');
+      if (hasSnackBowl !== isSnackBowl) setIsSnackBowl(hasSnackBowl);
+      
+      // Meyvelik
+      const hasFruitBowl = nameLower.includes('meyvelik') || nameLower.includes('fruit bowl');
+      if (hasFruitBowl !== isFruitBowl) setIsFruitBowl(hasFruitBowl);
+      
+      // Kap
+      const hasContainer = nameLower.includes('kap') || nameLower.includes('container');
+      if (hasContainer !== isContainer) setIsContainer(hasContainer);
+      
+      // Süzgeç
+      const hasStrainer = nameLower.includes('süzgeç') || nameLower.includes('süzgec') || nameLower.includes('strainer');
+      if (hasStrainer !== isStrainer) setIsStrainer(hasStrainer);
+      
+      // Baharatlık
+      const hasSpiceHolder = nameLower.includes('baharatlık') || nameLower.includes('spice holder');
+      if (hasSpiceHolder !== isSpiceHolder) setIsSpiceHolder(hasSpiceHolder);
+      
+      // Havluluk
+      const hasTowelHolder = nameLower.includes('havluluk') || nameLower.includes('towel holder');
+      if (hasTowelHolder !== isTowelHolder) setIsTowelHolder(hasTowelHolder);
+      
+      // Fırçalık
+      const hasBrushHolder = nameLower.includes('fırçalık') || nameLower.includes('brush holder');
+      if (hasBrushHolder !== isBrushHolder) setIsBrushHolder(hasBrushHolder);
     }
 
     // Vazo otomatik algılama - sadece yeni ürün eklerken ve manuel değişiklik yapılmadıysa
@@ -142,7 +195,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
         ]);
       }
     }
-  }, [name, isCandleholder, isKeychain, isSoapdish, hasSizes, manualCandleholderOverride, manualKeychainOverride, manualSoapdishOverride, manualSizeOverride, initial]);
+  }, [name, isCandleholder, isKeychain, isSoapdish, isSolidSoapDish, isSugarBowl, isSnackBowl, isFruitBowl, isContainer, isStrainer, isSpiceHolder, isTowelHolder, isBrushHolder, hasSizes, manualCandleholderOverride, manualKeychainOverride, manualSoapdishOverride, manualSolidSoapDishOverride, manualSizeOverride, initial]);
 
   // Mevcut boyutları yükle
   useEffect(() => {
@@ -314,11 +367,20 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       name: name.trim(),
       description: description.trim() || null,
       image_url: imageUrl,
-      weight_grams: hasSizes ? 0 : finalWeight, // Boyutlu ürünlerde weight_grams kullanılmaz
+      weight_grams: hasSizes ? 0 : finalWeight,
       has_sizes: hasSizes,
       is_candleholder: isCandleholder,
       is_keychain: isKeychain,
       is_soapdish: isSoapdish,
+      is_solid_soap_dish: isSolidSoapDish,
+      is_sugar_bowl: isSugarBowl,
+      is_snack_bowl: isSnackBowl,
+      is_fruit_bowl: isFruitBowl,
+      is_container: isContainer,
+      is_strainer: isStrainer,
+      is_spice_holder: isSpiceHolder,
+      is_towel_holder: isTowelHolder,
+      is_brush_holder: isBrushHolder,
     };
 
     let dbError: any = null;
@@ -333,7 +395,14 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
 
     if (dbError) {
       console.error("Ürün kaydetme hatası:", dbError);
-      toast({ title: "Kaydetme hatası", description: dbError.message, variant: "destructive" });
+      const errorMsg = dbError.message || dbError.hint || JSON.stringify(dbError);
+      toast({ 
+        title: "Kaydetme hatası", 
+        description: errorMsg.includes('is_solid_soap_dish') 
+          ? "Veritabanı migration'ı eksik. Lütfen add_solid_soap_dish.sql dosyasını Supabase'de çalıştırın."
+          : errorMsg,
+        variant: "destructive" 
+      });
       setSaving(false);
       return;
     }
@@ -651,25 +720,55 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
         </label>
       </div>
 
-      {/* Sabunluk Özelliği */}
+      {/* Sıvı Sabunluk Özelliği (Pompalı) */}
       <div className="bg-green-50 dark:bg-green-950/20 rounded-xl p-3 border border-green-200 dark:border-green-900">
         <label className="flex items-center gap-2 cursor-pointer">
           <input
             type="checkbox"
             checked={isSoapdish}
             onChange={(e) => {
-              setIsSoapdish(e.target.checked);
+              const checked = e.target.checked;
+              setIsSoapdish(checked);
+              if (checked) setIsSolidSoapDish(false); // Sıvı sabunluk seçilirse katı sabunluk kaldırılır
               setManualSoapdishOverride(true);
+              setManualSolidSoapDishOverride(true);
             }}
             className="w-4 h-4 rounded border-border text-green-500 focus:ring-2 focus:ring-green-500/50"
           />
           <div className="flex-1">
             <div className="flex items-center gap-1.5">
               <span className="text-lg">🧼</span>
-              <span className="text-sm font-semibold text-foreground">Sabunluk mu?</span>
+              <span className="text-sm font-semibold text-foreground">Sıvı Sabunluk mu? (Pompalı)</span>
             </div>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              Bu ürün sabunluk ise işaretleyin. Maliyet hesaplamasına sabunluk ücreti eklenecektir.
+              Sıvı sabun için pompalı sabunluk ise işaretleyin. Maliyet hesaplamasına pompa ücreti eklenecektir.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      {/* Katı Sabunluk Özelliği */}
+      <div className="bg-teal-50 dark:bg-teal-950/20 rounded-xl p-3 border border-teal-200 dark:border-teal-900">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isSolidSoapDish}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setIsSolidSoapDish(checked);
+              if (checked) setIsSoapdish(false); // Katı sabunluk seçilirse sıvı sabunluk kaldırılır
+              setManualSolidSoapDishOverride(true);
+              setManualSoapdishOverride(true);
+            }}
+            className="w-4 h-4 rounded border-border text-teal-500 focus:ring-2 focus:ring-teal-500/50"
+          />
+          <div className="flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="text-lg">🧴</span>
+              <span className="text-sm font-semibold text-foreground">Katı Sabunluk mu?</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Katı sabun için sabunluk ise işaretleyin. Pompa gerektirmez, ekstra maliyet eklenmez.
             </p>
           </div>
         </label>
@@ -750,8 +849,19 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
                         <span>Gramaj:</span>
                         <span className="font-medium text-foreground">{w.toFixed(1)} gr</span>
                       </div>
-                      <div className="flex justify-between font-semibold">
-                        <span className="text-foreground">Maliyet:</span>
+                      
+                      {/* Maliyet Dökümü */}
+                      <div className="space-y-0.5 py-1 border-y border-blue-200/50 dark:border-blue-800/50">
+                        {calc.breakdown.filter(b => b.enabled).map((item, i) => (
+                          <div key={i} className="flex justify-between text-muted-foreground">
+                            <span className="text-[9px]">{item.label.split('(')[0].trim()}:</span>
+                            <span className="text-[9px] font-medium text-foreground">{formatCurrency(item.value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      <div className="flex justify-between font-semibold pt-0.5">
+                        <span className="text-foreground">Toplam Maliyet:</span>
                         <span className="text-blue-600 dark:text-blue-400">{formatCurrency(calc.totalCost)}</span>
                       </div>
                       <div className="grid grid-cols-5 gap-0.5 pt-0.5 border-t border-blue-200/50 dark:border-blue-800/50">
@@ -795,7 +905,7 @@ export function ProductCatalogClient() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [filter, setFilter] = useState<"all" | "no-image">("all");
-  const [categoryFilter, setCategoryFilter] = useState<"all" | "candleholder" | "keychain" | "vase" | "soapdish">("all");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "candleholder" | "keychain" | "vase" | "soapdish" | "solid-soap-dish" | "sugar-bowl" | "snack-bowl" | "fruit-bowl" | "container" | "strainer" | "spice-holder" | "towel-holder" | "brush-holder">("all");
   const { toast } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const topRef = useRef<HTMLDivElement>(null);
@@ -859,27 +969,102 @@ export function ProductCatalogClient() {
     filteredProducts = filteredProducts.filter(p => p.is_keychain);
   } else if (categoryFilter === "soapdish") {
     filteredProducts = filteredProducts.filter(p => p.is_soapdish);
+  } else if (categoryFilter === "solid-soap-dish") {
+    filteredProducts = filteredProducts.filter(p => p.is_solid_soap_dish);
+  } else if (categoryFilter === "sugar-bowl") {
+    filteredProducts = filteredProducts.filter(p => p.is_sugar_bowl);
+  } else if (categoryFilter === "snack-bowl") {
+    filteredProducts = filteredProducts.filter(p => p.is_snack_bowl);
+  } else if (categoryFilter === "fruit-bowl") {
+    filteredProducts = filteredProducts.filter(p => p.is_fruit_bowl);
+  } else if (categoryFilter === "container") {
+    filteredProducts = filteredProducts.filter(p => p.is_container);
+  } else if (categoryFilter === "strainer") {
+    filteredProducts = filteredProducts.filter(p => p.is_strainer);
+  } else if (categoryFilter === "spice-holder") {
+    filteredProducts = filteredProducts.filter(p => p.is_spice_holder);
+  } else if (categoryFilter === "towel-holder") {
+    filteredProducts = filteredProducts.filter(p => p.is_towel_holder);
+  } else if (categoryFilter === "brush-holder") {
+    filteredProducts = filteredProducts.filter(p => p.is_brush_holder);
   } else if (categoryFilter === "vase") {
-    filteredProducts = filteredProducts.filter(p => !p.is_candleholder && !p.is_keychain && !p.is_soapdish);
+    filteredProducts = filteredProducts.filter(p => 
+      !p.is_candleholder && !p.is_keychain && !p.is_soapdish && !p.is_solid_soap_dish &&
+      !p.is_sugar_bowl && !p.is_snack_bowl && !p.is_fruit_bowl && !p.is_container && !p.is_strainer &&
+      !p.is_spice_holder && !p.is_towel_holder && !p.is_brush_holder
+    );
   }
   
   const noImageCount = products.filter(p => !p.image_url).length;
   const candleholderCount = products.filter(p => p.is_candleholder).length;
   const keychainCount = products.filter(p => p.is_keychain).length;
   const soapdishCount = products.filter(p => p.is_soapdish).length;
-  const vaseCount = products.filter(p => !p.is_candleholder && !p.is_keychain && !p.is_soapdish).length;
+  const solidSoapDishCount = products.filter(p => p.is_solid_soap_dish).length;
+  const sugarBowlCount = products.filter(p => p.is_sugar_bowl).length;
+  const snackBowlCount = products.filter(p => p.is_snack_bowl).length;
+  const fruitBowlCount = products.filter(p => p.is_fruit_bowl).length;
+  const containerCount = products.filter(p => p.is_container).length;
+  const strainerCount = products.filter(p => p.is_strainer).length;
+  const spiceHolderCount = products.filter(p => p.is_spice_holder).length;
+  const towelHolderCount = products.filter(p => p.is_towel_holder).length;
+  const brushHolderCount = products.filter(p => p.is_brush_holder).length;
+  const vaseCount = products.filter(p => 
+    !p.is_candleholder && !p.is_keychain && !p.is_soapdish && !p.is_solid_soap_dish &&
+    !p.is_sugar_bowl && !p.is_snack_bowl && !p.is_fruit_bowl && !p.is_container && !p.is_strainer &&
+    !p.is_spice_holder && !p.is_towel_holder && !p.is_brush_holder
+  ).length;
 
   return (
     <div className="space-y-4">
-      <div ref={topRef} className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <p className="text-sm text-muted-foreground">{filteredProducts.length} ürün</p>
+      <div ref={topRef} className="space-y-2">
+        {/* Üst Satır: Ürün Sayısı, Resim Filtresi, Ürün Ekle Butonu */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-muted-foreground">{filteredProducts.length} ürün</p>
+            
+            {/* Resim Filtresi */}
+            {noImageCount > 0 && (
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setFilter("all")}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                    filter === "all"
+                      ? "bg-blue-500 text-white shadow-sm"
+                      : "bg-muted text-muted-foreground hover:bg-muted/70"
+                  }`}
+                >
+                  Tümü
+                </button>
+                <button
+                  onClick={() => setFilter("no-image")}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                    filter === "no-image"
+                      ? "bg-amber-500 text-white shadow-sm"
+                      : "bg-muted text-muted-foreground hover:bg-muted/70"
+                  }`}
+                >
+                  Resim Bekleyen ({noImageCount})
+                </button>
+              </div>
+            )}
+          </div>
           
-          {/* Kategori Filtreleri */}
-          <div className="flex gap-1">
+          {!showForm && !editing && (
+            <button
+              onClick={startAdd}
+              className="flex items-center gap-2 bg-gradient-to-r from-blue-500 to-violet-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
+            >
+              <Plus className="w-4 h-4" /> Ürün Ekle
+            </button>
+          )}
+        </div>
+        
+        {/* Alt Satır: Kategori Filtreleri - Scrollable */}
+        <div className="overflow-x-auto pb-2 -mx-4 px-4">
+          <div className="flex gap-1 min-w-max">
             <button
               onClick={() => setCategoryFilter("all")}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
                 categoryFilter === "all"
                   ? "bg-gradient-to-r from-blue-500 to-violet-600 text-white shadow-sm"
                   : "bg-muted text-muted-foreground hover:bg-muted/70"
@@ -890,7 +1075,7 @@ export function ProductCatalogClient() {
             {candleholderCount > 0 && (
               <button
                 onClick={() => setCategoryFilter("candleholder")}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
                   categoryFilter === "candleholder"
                     ? "bg-amber-500 text-white shadow-sm"
                     : "bg-muted text-muted-foreground hover:bg-muted/70"
@@ -902,7 +1087,7 @@ export function ProductCatalogClient() {
             {keychainCount > 0 && (
               <button
                 onClick={() => setCategoryFilter("keychain")}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
                   categoryFilter === "keychain"
                     ? "bg-violet-500 text-white shadow-sm"
                     : "bg-muted text-muted-foreground hover:bg-muted/70"
@@ -914,19 +1099,127 @@ export function ProductCatalogClient() {
             {soapdishCount > 0 && (
               <button
                 onClick={() => setCategoryFilter("soapdish")}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
                   categoryFilter === "soapdish"
                     ? "bg-green-500 text-white shadow-sm"
                     : "bg-muted text-muted-foreground hover:bg-muted/70"
                 }`}
               >
-                🧼 Sabunluklar ({soapdishCount})
+                🧼 Sıvı Sabunluklar ({soapdishCount})
+              </button>
+            )}
+            {solidSoapDishCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("solid-soap-dish")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "solid-soap-dish"
+                    ? "bg-teal-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🧴 Katı Sabunluklar ({solidSoapDishCount})
+              </button>
+            )}
+            {sugarBowlCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("sugar-bowl")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "sugar-bowl"
+                    ? "bg-pink-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🍬 Şekerlikler ({sugarBowlCount})
+              </button>
+            )}
+            {snackBowlCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("snack-bowl")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "snack-bowl"
+                    ? "bg-orange-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🥜 Çerezlikler ({snackBowlCount})
+              </button>
+            )}
+            {fruitBowlCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("fruit-bowl")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "fruit-bowl"
+                    ? "bg-red-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🍎 Meyvelikler ({fruitBowlCount})
+              </button>
+            )}
+            {containerCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("container")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "container"
+                    ? "bg-slate-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🥣 Kaplar ({containerCount})
+              </button>
+            )}
+            {strainerCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("strainer")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "strainer"
+                    ? "bg-cyan-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🥄 Süzgeçler ({strainerCount})
+              </button>
+            )}
+            {spiceHolderCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("spice-holder")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "spice-holder"
+                    ? "bg-yellow-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🌶️ Baharatlıklar ({spiceHolderCount})
+              </button>
+            )}
+            {towelHolderCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("towel-holder")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "towel-holder"
+                    ? "bg-indigo-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🧺 Havluluklar ({towelHolderCount})
+              </button>
+            )}
+            {brushHolderCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("brush-holder")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "brush-holder"
+                    ? "bg-purple-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🪥 Fırçalıklar ({brushHolderCount})
               </button>
             )}
             {vaseCount > 0 && (
               <button
                 onClick={() => setCategoryFilter("vase")}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
                   categoryFilter === "vase"
                     ? "bg-emerald-500 text-white shadow-sm"
                     : "bg-muted text-muted-foreground hover:bg-muted/70"
@@ -936,41 +1229,7 @@ export function ProductCatalogClient() {
               </button>
             )}
           </div>
-          
-          {/* Resim Filtresi */}
-          {noImageCount > 0 && (
-            <div className="flex gap-1">
-              <button
-                onClick={() => setFilter("all")}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  filter === "all"
-                    ? "bg-blue-500 text-white shadow-sm"
-                    : "bg-muted text-muted-foreground hover:bg-muted/70"
-                }`}
-              >
-                Tümü
-              </button>
-              <button
-                onClick={() => setFilter("no-image")}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  filter === "no-image"
-                    ? "bg-amber-500 text-white shadow-sm"
-                    : "bg-muted text-muted-foreground hover:bg-muted/70"
-                }`}
-              >
-                Resim Bekleyen ({noImageCount})
-              </button>
-            </div>
-          )}
         </div>
-        {!showForm && !editing && (
-          <button
-            onClick={startAdd}
-            className="flex items-center gap-2 bg-gradient-to-r from-blue-500 to-violet-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
-          >
-            <Plus className="w-4 h-4" /> Ürün Ekle
-          </button>
-        )}
       </div>
 
       {(showForm) && (
