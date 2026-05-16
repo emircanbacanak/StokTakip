@@ -85,6 +85,7 @@ export type Database = {
           size_name: string;
           weight_grams: number;
           sort_order: number;
+          price: number | null;
           created_at: string;
         };
         Insert: {
@@ -93,6 +94,7 @@ export type Database = {
           size_name: string;
           weight_grams: number;
           sort_order?: number;
+          price?: number | null;
           created_at?: string;
         };
         Update: {
@@ -101,6 +103,7 @@ export type Database = {
           size_name?: string;
           weight_grams?: number;
           sort_order?: number;
+          price?: number | null;
           created_at?: string;
         };
         Relationships: [
