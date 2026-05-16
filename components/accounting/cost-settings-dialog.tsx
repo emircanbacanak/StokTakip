@@ -52,6 +52,9 @@ export function CostSettingsDialog({
   const [keychainCost, setKeychainCost] = useState(DEFAULT_COST_SETTINGS.keychain_cost_per_unit);
   const [keychainEnabled, setKeychainEnabled] = useState(DEFAULT_COST_SETTINGS.keychain_enabled);
   
+  const [soapdishCost, setSoapdishCost] = useState(DEFAULT_COST_SETTINGS.soapdish_cost_per_unit);
+  const [soapdishEnabled, setSoapdishEnabled] = useState(DEFAULT_COST_SETTINGS.soapdish_enabled);
+  
   const [profitMargin1, setProfitMargin1] = useState(DEFAULT_COST_SETTINGS.profit_margin_1);
   const [profitMargin2, setProfitMargin2] = useState(DEFAULT_COST_SETTINGS.profit_margin_2);
   const [profitMargin3, setProfitMargin3] = useState(DEFAULT_COST_SETTINGS.profit_margin_3);
@@ -92,6 +95,8 @@ export function CostSettingsDialog({
         setCandleholderEnabled(data.candleholder_enabled);
         setKeychainCost(data.keychain_cost_per_unit);
         setKeychainEnabled(data.keychain_enabled);
+        setSoapdishCost(data.soapdish_cost_per_unit);
+        setSoapdishEnabled(data.soapdish_enabled);
         setProfitMargin1(data.profit_margin_1);
         setProfitMargin2(data.profit_margin_2);
         setProfitMargin3(data.profit_margin_3);
@@ -129,6 +134,8 @@ export function CostSettingsDialog({
         candleholder_enabled: candleholderEnabled,
         keychain_cost_per_unit: keychainCost,
         keychain_enabled: keychainEnabled,
+        soapdish_cost_per_unit: soapdishCost,
+        soapdish_enabled: soapdishEnabled,
         profit_margin_1: profitMargin1,
         profit_margin_2: profitMargin2,
         profit_margin_3: profitMargin3,
@@ -177,6 +184,8 @@ export function CostSettingsDialog({
     setCandleholderEnabled(DEFAULT_COST_SETTINGS.candleholder_enabled);
     setKeychainCost(DEFAULT_COST_SETTINGS.keychain_cost_per_unit);
     setKeychainEnabled(DEFAULT_COST_SETTINGS.keychain_enabled);
+    setSoapdishCost(DEFAULT_COST_SETTINGS.soapdish_cost_per_unit);
+    setSoapdishEnabled(DEFAULT_COST_SETTINGS.soapdish_enabled);
     setProfitMargin1(DEFAULT_COST_SETTINGS.profit_margin_1);
     setProfitMargin2(DEFAULT_COST_SETTINGS.profit_margin_2);
     setProfitMargin3(DEFAULT_COST_SETTINGS.profit_margin_3);
@@ -386,6 +395,37 @@ export function CostSettingsDialog({
                   value={keychainCost}
                   onChange={(e) => setKeychainCost(parseFloat(e.target.value) || 0)}
                   disabled={!keychainEnabled}
+                />
+              </div>
+            </div>
+
+            {/* Sabunluk Pompası Ücreti */}
+            <div className="space-y-3 p-4 bg-muted/30 rounded-lg border border-border">
+              <div className="flex items-center justify-between">
+                <Label className="text-base font-semibold">Sabunluk Pompası Ücreti</Label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={soapdishEnabled}
+                    onChange={(e) => setSoapdishEnabled(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm text-muted-foreground">Aktif</span>
+                </label>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="soapdish-cost" className="text-sm text-muted-foreground">
+                  TL/adet (Sabunluk özelliği olan ürünler için eklenen pompa maliyeti)
+                </Label>
+                <Input
+                  id="soapdish-cost"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="999999.99"
+                  value={soapdishCost}
+                  onChange={(e) => setSoapdishCost(parseFloat(e.target.value) || 0)}
+                  disabled={!soapdishEnabled}
                 />
               </div>
             </div>

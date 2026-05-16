@@ -83,6 +83,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [hasSizes, setHasSizes] = useState(initial?.has_sizes ?? false);
   const [isCandleholder, setIsCandleholder] = useState(initial?.is_candleholder ?? false);
   const [isKeychain, setIsKeychain] = useState(initial?.is_keychain ?? false);
+  const [isSoapdish, setIsSoapdish] = useState(initial?.is_soapdish ?? false); // Migration sonrası çalışacak
   const [sizes, setSizes] = useState<Array<{ id?: string; size_name: string; weight_grams: string }>>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(initial?.image_url ?? null);
   const [originalImage, setOriginalImage] = useState<string | null>(initial?.image_url ?? null);
@@ -93,6 +94,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [costSettings, setCostSettings] = useState<CostSettings | null>(null);
   const [manualCandleholderOverride, setManualCandleholderOverride] = useState(false);
   const [manualKeychainOverride, setManualKeychainOverride] = useState(false);
+  const [manualSoapdishOverride, setManualSoapdishOverride] = useState(false);
   const [manualSizeOverride, setManualSizeOverride] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -119,6 +121,14 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       }
     }
 
+    // Sabunluk otomatik algılama - sadece yeni ürün eklerken
+    if (!initial && !manualSoapdishOverride) {
+      const isSoapdishName = nameLower.includes('sabunluk') || nameLower.includes('soap dish') || nameLower.includes('soapdish');
+      if (isSoapdishName !== isSoapdish) {
+        setIsSoapdish(isSoapdishName);
+      }
+    }
+
     // Vazo otomatik algılama - sadece yeni ürün eklerken ve manuel değişiklik yapılmadıysa
     if (!initial && !manualSizeOverride) {
       const isVase = nameLower.includes('vazo') || nameLower.includes('vase');
@@ -132,7 +142,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
         ]);
       }
     }
-  }, [name, isCandleholder, isKeychain, hasSizes, manualCandleholderOverride, manualKeychainOverride, manualSizeOverride, initial]);
+  }, [name, isCandleholder, isKeychain, isSoapdish, hasSizes, manualCandleholderOverride, manualKeychainOverride, manualSoapdishOverride, manualSizeOverride, initial]);
 
   // Mevcut boyutları yükle
   useEffect(() => {
@@ -308,6 +318,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       has_sizes: hasSizes,
       is_candleholder: isCandleholder,
       is_keychain: isKeychain,
+      is_soapdish: isSoapdish,
     };
 
     let dbError: any = null;
@@ -640,12 +651,36 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
         </label>
       </div>
 
+      {/* Sabunluk Özelliği */}
+      <div className="bg-green-50 dark:bg-green-950/20 rounded-xl p-3 border border-green-200 dark:border-green-900">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isSoapdish}
+            onChange={(e) => {
+              setIsSoapdish(e.target.checked);
+              setManualSoapdishOverride(true);
+            }}
+            className="w-4 h-4 rounded border-border text-green-500 focus:ring-2 focus:ring-green-500/50"
+          />
+          <div className="flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="text-lg">🧼</span>
+              <span className="text-sm font-semibold text-foreground">Sabunluk mu?</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Bu ürün sabunluk ise işaretleyin. Maliyet hesaplamasına sabunluk ücreti eklenecektir.
+            </p>
+          </div>
+        </label>
+      </div>
+
       {/* Maliyet Önizlemesi */}
       {costSettings && (
         <>
           {!hasSizes && parseFloat(weightGrams) > 0 && (() => {
             const w = parseFloat(weightGrams);
-            const calc = calculateProductCost(w, costSettings, isCandleholder, isKeychain);
+            const calc = calculateProductCost(w, costSettings, isCandleholder, isKeychain, isSoapdish);
             return (
               <div className="bg-gradient-to-br from-blue-50 to-violet-50 dark:from-blue-950/20 dark:to-violet-950/20 rounded-xl border border-blue-200 dark:border-blue-900 p-3 space-y-2">
                 <p className="text-[10px] font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wider">
@@ -703,7 +738,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
               {sizes.map((size, idx) => {
                 const w = parseFloat(size.weight_grams);
                 if (isNaN(w) || w <= 0) return null;
-                const calc = calculateProductCost(w, costSettings, isCandleholder, isKeychain);
+                const calc = calculateProductCost(w, costSettings, isCandleholder, isKeychain, isSoapdish);
                 return (
                   <div key={idx} className="bg-white/50 dark:bg-black/20 rounded-lg p-2 space-y-1">
                     <p className="text-xs font-bold text-foreground flex items-center gap-1">
@@ -760,7 +795,7 @@ export function ProductCatalogClient() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [filter, setFilter] = useState<"all" | "no-image">("all");
-  const [categoryFilter, setCategoryFilter] = useState<"all" | "candleholder" | "keychain" | "vase">("all");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "candleholder" | "keychain" | "vase" | "soapdish">("all");
   const { toast } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const topRef = useRef<HTMLDivElement>(null);
@@ -822,14 +857,17 @@ export function ProductCatalogClient() {
     filteredProducts = filteredProducts.filter(p => p.is_candleholder);
   } else if (categoryFilter === "keychain") {
     filteredProducts = filteredProducts.filter(p => p.is_keychain);
+  } else if (categoryFilter === "soapdish") {
+    filteredProducts = filteredProducts.filter(p => p.is_soapdish);
   } else if (categoryFilter === "vase") {
-    filteredProducts = filteredProducts.filter(p => !p.is_candleholder && !p.is_keychain);
+    filteredProducts = filteredProducts.filter(p => !p.is_candleholder && !p.is_keychain && !p.is_soapdish);
   }
   
   const noImageCount = products.filter(p => !p.image_url).length;
   const candleholderCount = products.filter(p => p.is_candleholder).length;
   const keychainCount = products.filter(p => p.is_keychain).length;
-  const vaseCount = products.filter(p => !p.is_candleholder && !p.is_keychain).length;
+  const soapdishCount = products.filter(p => p.is_soapdish).length;
+  const vaseCount = products.filter(p => !p.is_candleholder && !p.is_keychain && !p.is_soapdish).length;
 
   return (
     <div className="space-y-4">
@@ -871,6 +909,18 @@ export function ProductCatalogClient() {
                 }`}
               >
                 🔑 Anahtarlıklar ({keychainCount})
+              </button>
+            )}
+            {soapdishCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("soapdish")}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  categoryFilter === "soapdish"
+                    ? "bg-green-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🧼 Sabunluklar ({soapdishCount})
               </button>
             )}
             {vaseCount > 0 && (

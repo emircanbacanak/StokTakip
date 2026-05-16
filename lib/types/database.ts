@@ -19,6 +19,8 @@ export type Database = {
           has_sizes: boolean;
           is_candleholder: boolean;
           is_keychain: boolean;
+          is_soapdish: boolean;
+          price: number | null;
           created_at: string;
         };
         Insert: {
@@ -30,6 +32,8 @@ export type Database = {
           has_sizes?: boolean;
           is_candleholder?: boolean;
           is_keychain?: boolean;
+          is_soapdish?: boolean;
+          price?: number | null;
           created_at?: string;
         };
         Update: {
@@ -41,6 +45,8 @@ export type Database = {
           has_sizes?: boolean;
           is_candleholder?: boolean;
           is_keychain?: boolean;
+          is_soapdish?: boolean;
+          price?: number | null;
           created_at?: string;
         };
         Relationships: [];
@@ -95,6 +101,8 @@ export type Database = {
           candleholder_enabled: boolean;
           keychain_cost_per_unit: number;
           keychain_enabled: boolean;
+          soapdish_cost_per_unit: number;
+          soapdish_enabled: boolean;
           profit_margin_1: number;
           profit_margin_2: number;
           profit_margin_3: number;
@@ -118,6 +126,8 @@ export type Database = {
           candleholder_enabled?: boolean;
           keychain_cost_per_unit?: number;
           keychain_enabled?: boolean;
+          soapdish_cost_per_unit?: number;
+          soapdish_enabled?: boolean;
           profit_margin_1?: number;
           profit_margin_2?: number;
           profit_margin_3?: number;
@@ -141,6 +151,8 @@ export type Database = {
           candleholder_enabled?: boolean;
           keychain_cost_per_unit?: number;
           keychain_enabled?: boolean;
+          soapdish_cost_per_unit?: number;
+          soapdish_enabled?: boolean;
           profit_margin_1?: number;
           profit_margin_2?: number;
           profit_margin_3?: number;

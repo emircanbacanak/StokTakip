@@ -90,7 +90,8 @@ export function calculateProductCost(
   weightGrams: number,
   settings: CostSettings,
   isCandleholder: boolean = false,
-  isKeychain: boolean = false
+  isKeychain: boolean = false,
+  isSoapdish: boolean = false
 ): CostCalculationResult {
   // Fire dahil gramaj = gerçekte harcanan toplam filament
   // 40 gr ürün + %10 fire = 44 gr filament harcanır
@@ -126,8 +127,13 @@ export function calculateProductCost(
     ? settings.keychain_cost_per_unit
     : 0;
 
+  // Sabunluk maliyeti: ürün sabunluk ise ve ayar aktifse
+  const soapdishCost = (isSoapdish && settings.soapdish_enabled)
+    ? settings.soapdish_cost_per_unit
+    : 0;
+
   // Toplam maliyet (fire ayrı kalem yok — zaten filament içinde)
-  const totalCost = rawFilamentCost + electricityCost + depreciationCost + candleholderCost + keychainCost;
+  const totalCost = rawFilamentCost + electricityCost + depreciationCost + candleholderCost + keychainCost + soapdishCost;
 
   // Önerilen satış fiyatları (kar marjlı)
   let price10 = totalCost * (1 + settings.profit_margin_1 / 100);
@@ -170,6 +176,11 @@ export function calculateProductCost(
       label: `Zincir Ücreti (${settings.keychain_cost_per_unit} TL/adet)`,
       value: keychainCost,
       enabled: isKeychain && settings.keychain_enabled,
+    },
+    {
+      label: `Sabunluk Ücreti (${settings.soapdish_cost_per_unit} TL/adet)`,
+      value: soapdishCost,
+      enabled: isSoapdish && settings.soapdish_enabled,
     },
   ];
 
@@ -346,6 +357,8 @@ export const DEFAULT_COST_SETTINGS: Omit<CostSettings, "id" | "updated_at" | "up
   candleholder_enabled: false,
   keychain_cost_per_unit: 2.0,
   keychain_enabled: true,
+  soapdish_cost_per_unit: 0,
+  soapdish_enabled: true,
   profit_margin_1: 10.0,
   profit_margin_2: 20.0,
   profit_margin_3: 30.0,

@@ -1,17 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { BarChart2, Calculator } from "lucide-react";
+import { BarChart2, Calculator, DollarSign } from "lucide-react";
 import { AccountingOverviewTab } from "./accounting-overview-tab";
 import { CostAnalysisTab } from "./cost-analysis-tab";
+import { ProductPricesTab } from "./product-prices-tab";
 
 const tabs = [
   { id: "overview", label: "Genel Bakış", icon: BarChart2 },
   { id: "cost-analysis", label: "Maliyet Analizi", icon: Calculator },
+  { id: "product-prices", label: "Ürün Fiyatları", icon: DollarSign },
 ];
 
 export function AccountingClient() {
-  const [activeTab, setActiveTab] = useState<"overview" | "cost-analysis">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "cost-analysis" | "product-prices">("overview");
 
   return (
     <div className="min-h-screen bg-muted/30 p-4 lg:p-8 pb-24 lg:pb-8">
@@ -41,6 +43,7 @@ export function AccountingClient() {
         {/* Tab Content */}
         {activeTab === "overview" && <AccountingOverviewTab />}
         {activeTab === "cost-analysis" && <CostAnalysisTab />}
+        {activeTab === "product-prices" && <ProductPricesTab />}
       </div>
     </div>
   );
