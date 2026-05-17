@@ -130,8 +130,14 @@ function ItemsTab({ items, totalDelivered, totalOrdered, updateProduction }: {
   // Teslim Edilenler: Gerçekten teslimat yapılmış (delivered_quantity > 0)
   const deliveredItems = items.filter(item => (item.delivered_quantity || 0) > 0);
   
-  // Teslim Edilecek (Kalan): Henüz teslim edilmemiş veya kısmen teslim edilmiş
-  const remainingItems = items.filter(item => (item.delivered_quantity || 0) < item.quantity);
+  // Teslim Edilecek (Kalan): Sipariş miktarı veya üretilen miktara göre henüz teslim edilmemiş olanlar
+  // Fazla üretim dahil: max(quantity, produced_quantity) kadar teslim edilmemişse listede göster
+  const remainingItems = items.filter(item => {
+    const delivered = item.delivered_quantity || 0;
+    const produced = item.produced_quantity || 0;
+    const maxToDeliver = Math.max(item.quantity, produced);
+    return delivered < maxToDeliver;
+  });
 
   const groupMap = (itemList: OrderItem[]) => {
     const map = new Map<string, OrderItem[]>();
@@ -205,9 +211,11 @@ function ItemsTab({ items, totalDelivered, totalOrdered, updateProduction }: {
         {isOpen && (
           <div className="border-t border-border divide-y divide-border/60 bg-muted/20">
             {groupItems.map((item) => {
-              const remaining = item.quantity - (item.delivered_quantity || 0);
-              const deliveryPct = item.quantity > 0 ? Math.round(((item.delivered_quantity || 0) / item.quantity) * 100) : 0;
               const producedQty = item.produced_quantity || 0;
+              const remaining = Math.max(0, Math.max(item.quantity, producedQty) - (item.delivered_quantity || 0));
+              const deliveryPct = Math.max(item.quantity, producedQty) > 0
+                ? Math.min(100, Math.round(((item.delivered_quantity || 0) / Math.max(item.quantity, producedQty)) * 100))
+                : 0;
               const productionPct = item.quantity > 0 ? Math.min(100, Math.round((producedQty / item.quantity) * 100)) : 0;
               const isOverProduced = producedQty > item.quantity;
 
@@ -253,7 +261,7 @@ function ItemsTab({ items, totalDelivered, totalOrdered, updateProduction }: {
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[11px] font-medium text-muted-foreground">Teslimat</span>
                       <span className="text-[11px] text-muted-foreground">
-                        {item.delivered_quantity || 0}/{item.quantity}
+                        {item.delivered_quantity || 0}/{Math.max(item.quantity, producedQty)}
                         {remaining > 0 && <span className="text-red-500 ml-1 font-medium">({remaining} kaldı)</span>}
                       </span>
                     </div>

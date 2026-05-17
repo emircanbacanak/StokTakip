@@ -202,13 +202,14 @@ export function OrdersClient() {
     }, 0);
   };
 
-  // Teslim edilecek ürün sayısı - SADECE orijinal sipariş miktarlarına göre (fazla üretim dahil değil)
+  // Teslim edilecek ürün sayısı — fazla üretim dahil (produced_quantity > quantity olan kalemleri de sayar)
   const calculateRemainingToDeliver = (orders: Order[]) => {
     return orders.reduce((sum, order) => {
       const orderRemaining = order.items.reduce((itemSum, item) => {
-        // Orijinal sipariş miktarı - teslim edilen miktar
         const deliveredQty = item.delivered_quantity || 0;
-        const remaining = Math.max(0, item.quantity - deliveredQty);
+        // Fazla üretim dahil: max(sipariş miktarı, üretilen miktar) - teslim edilen
+        const maxToDeliver = Math.max(item.quantity, item.produced_quantity || 0);
+        const remaining = Math.max(0, maxToDeliver - deliveredQty);
         return itemSum + remaining;
       }, 0);
       return sum + orderRemaining;

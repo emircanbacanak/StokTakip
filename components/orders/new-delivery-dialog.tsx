@@ -32,11 +32,11 @@ export function NewDeliveryDialog({
   const { toast } = useToast();
   const [deliveryItems, setDeliveryItems] = useState<DeliveryItemInput[]>(
     order.items
-      .filter((item) => (item.delivered_quantity || 0) < item.quantity)
+      .filter((item) => (item.produced_quantity || 0) > (item.delivered_quantity || 0))
       .map((item) => ({
         order_item_id: item.id,
         quantity: 0, // Başlangıçta 0, kullanıcı istediği kadarını girer
-        max_quantity: item.quantity - (item.delivered_quantity || 0),
+        max_quantity: (item.produced_quantity || 0) - (item.delivered_quantity || 0), // Fazla üretim dahil
       }))
   );
   const [notes, setNotes] = useState("");
@@ -188,15 +188,20 @@ export function NewDeliveryDialog({
     return sum + deliveryValue;
   }, 0);
   
-  // Fazla üretim bilgisi (sadece gösterim için)
+  // Fazla üretim bilgisi - sadece henüz teslim edilmemiş fazla üretim (gösterim için)
   const totalOverProduction = order.items.reduce((sum, item) => {
-    const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
-    return sum + overProduced;
+    const produced = item.produced_quantity || 0;
+    const delivered = item.delivered_quantity || 0;
+    // Teslim edilmemiş fazla = üretilen - max(sipariş, teslim edilen)
+    const pendingExtra = Math.max(0, produced - Math.max(item.quantity, delivered));
+    return sum + pendingExtra;
   }, 0);
   
   const totalOverProductionValue = order.items.reduce((sum, item) => {
-    const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
-    return sum + (overProduced * item.unit_price);
+    const produced = item.produced_quantity || 0;
+    const delivered = item.delivered_quantity || 0;
+    const pendingExtra = Math.max(0, produced - Math.max(item.quantity, delivered));
+    return sum + (pendingExtra * item.unit_price);
   }, 0);
 
   // Ürünleri grupla - üretilmiş ama teslim edilmemiş olanlar

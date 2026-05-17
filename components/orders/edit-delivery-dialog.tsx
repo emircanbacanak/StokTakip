@@ -55,18 +55,19 @@ export function EditDeliveryDialog({
   // Mevcut teslimat kalemlerini dönüştür
   const [deliveryItems, setDeliveryItems] = useState<EditDeliveryItemInput[]>(() => {
     return delivery.items.map((item) => {
-      // Bu teslimat içindeki miktar + henüz teslim edilmemiş miktar = max
+      // Bu teslimat içindeki miktar + diğer teslimatlar = alreadyDelivered
       const alreadyDelivered = item.order_item.delivered_quantity || 0;
       const currentDeliveryQty = item.quantity || 0; // Bu teslimat içindeki miktar
-      const totalOrdered = item.order_item.quantity || 0;
+      const producedQty = item.order_item.produced_quantity || 0;
       const otherDeliveries = alreadyDelivered - currentDeliveryQty; // Diğer teslimatlar
-      const remaining = totalOrdered - otherDeliveries; // Bu teslimat için max
+      // Max: üretilen kadar teslim edilebilir (sipariş miktarını aşan fazla üretim dahil)
+      const remaining = producedQty - otherDeliveries;
       
       return {
         id: item.id,
         order_item_id: item.order_item_id,
-        quantity: currentDeliveryQty, // Null/undefined kontrolü ile
-        max_quantity: Math.max(0, remaining), // Negatif değer olmasın
+        quantity: currentDeliveryQty,
+        max_quantity: Math.max(0, remaining),
         product_name: item.order_item.product_name,
         color: item.order_item.color,
         unit_price: item.order_item.unit_price || 0,
@@ -81,9 +82,9 @@ export function EditDeliveryDialog({
     const items = delivery.items.map((item) => {
       const alreadyDelivered = item.order_item.delivered_quantity || 0;
       const currentDeliveryQty = item.quantity || 0;
-      const totalOrdered = item.order_item.quantity || 0;
+      const producedQty = item.order_item.produced_quantity || 0;
       const otherDeliveries = alreadyDelivered - currentDeliveryQty;
-      const remaining = totalOrdered - otherDeliveries;
+      const remaining = producedQty - otherDeliveries;
       
       return {
         id: item.id,

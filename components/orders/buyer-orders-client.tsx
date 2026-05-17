@@ -284,19 +284,31 @@ export function BuyerOrdersClient({ buyerId }: { buyerId: string }) {
     return s + o.total_amount + overProductionValue;
   }, 0);
 
-  // Fazla üretim hesabı
+  // Fazla üretim hesabı - sadece henüz teslim edilmemiş fazla üretim
   const overItems: OverItem[] = orders.flatMap((o) =>
     o.items
-      .filter((item) => (item.produced_quantity || 0) > item.quantity)
-      .map((item) => ({
-        product_name: item.product_name,
-        color: item.color,
-        ordered: item.quantity,
-        produced: item.produced_quantity || 0,
-        extra: (item.produced_quantity || 0) - item.quantity,
-        unit_price: item.unit_price || 0,
-        size_name: item.size_name,
-      }))
+      .filter((item) => {
+        const produced = item.produced_quantity || 0;
+        const delivered = item.delivered_quantity || 0;
+        // Fazla üretilmiş VE teslim edilmemiş fazla kısım varsa göster
+        return produced > item.quantity && produced > delivered;
+      })
+      .map((item) => {
+        const produced = item.produced_quantity || 0;
+        const delivered = item.delivered_quantity || 0;
+        // Teslim edilmemiş fazla = üretilen - max(sipariş adedi, teslim edilen)
+        const extra = produced - Math.max(item.quantity, delivered);
+        return {
+          product_name: item.product_name,
+          color: item.color,
+          ordered: item.quantity,
+          produced,
+          extra: Math.max(0, extra),
+          unit_price: item.unit_price || 0,
+          size_name: item.size_name,
+        };
+      })
+      .filter((i) => i.extra > 0)
   );
   const totalOverValue = overItems.reduce((s, i) => s + i.extra * i.unit_price, 0);
 

@@ -41,10 +41,17 @@ export function NewPaymentDialog({
   const willOverpay = amountNum > remainingDebt && remainingDebt > 0;
   const overpayAmount = amountNum - remainingDebt;
 
-  // Teslim edilen ürünlerin toplam değeri
+  // Teslim edilen ürünlerin toplam değeri (fazla üretim dahil teslim edilen)
   const deliveredValue = order.items.reduce((sum, item) => {
     const deliveredQty = item.delivered_quantity || 0;
     return sum + (deliveredQty * item.unit_price);
+  }, 0);
+
+  // Teslim edilen fazla üretim değeri — sadece delivered_quantity > quantity olan kısım
+  // (2. partinin fazlası henüz teslim edilmediyse burada görünmez, edilince eklenir)
+  const deliveredOverProductionValue = order.items.reduce((sum, item) => {
+    const deliveredOver = Math.max(0, (item.delivered_quantity || 0) - item.quantity);
+    return sum + (deliveredOver * item.unit_price);
   }, 0);
 
   // Teslim edilen ürünler için alınması gereken ödeme
@@ -53,7 +60,7 @@ export function NewPaymentDialog({
   // Teslimatlardan kalan borç = Teslim edilen değer - Alınan ödeme
   const deliveryDebt = Math.max(0, expectedPaymentForDelivered - order.paid_amount);
   
-  // Fazla üretim toplam değeri
+  // Toplam fazla üretim değeri (sipariş bazlı — teslim bağımsız)
   const totalOverProductionValue = order.items.reduce((sum, item) => {
     const overProduced = Math.max(0, (item.produced_quantity || 0) - item.quantity);
     return sum + (overProduced * item.unit_price);
@@ -140,10 +147,10 @@ export function NewPaymentDialog({
                     <span className="text-lg font-bold text-blue-600">{formatCurrency(deliveredValue)}</span>
                   </div>
                   
-                  {totalOverProductionValue > 0 && (
+                  {deliveredOverProductionValue > 0 && (
                     <div className="flex justify-between items-center text-xs pl-3">
                       <span className="text-muted-foreground">• Fazla Üretim Dahil</span>
-                      <span className="font-semibold text-amber-600">{formatCurrency(totalOverProductionValue)}</span>
+                      <span className="font-semibold text-amber-600">{formatCurrency(deliveredOverProductionValue)}</span>
                     </div>
                   )}
                   
