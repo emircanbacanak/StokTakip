@@ -565,6 +565,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
             min="0"
             value={weightGrams}
             onChange={(e) => setWeightGrams(e.target.value)}
+            onWheel={(e) => (e.target as HTMLInputElement).blur()}
             placeholder="Örn: 40"
             className={inputCls}
           />
@@ -650,6 +651,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
                       next[idx].weight_grams = e.target.value;
                       setSizes(next);
                     }}
+                    onWheel={(e) => (e.target as HTMLInputElement).blur()}
                     placeholder="40"
                     className={inputCls + " text-xs"}
                   />
@@ -928,16 +930,38 @@ export function ProductCatalogClient() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Scroll pozisyonunu kaydet
+  const savedScrollY = useRef(0);
+
   function startEdit(p: Product) {
-    setEditing(p);
-    setShowForm(false);
-    setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 50);
+    savedScrollY.current = window.scrollY;
+    // Önce mevcut formu kapat, sonra yenisini aç (React state batching'i kırmak için)
+    if (editing) {
+      setEditing(null);
+      setTimeout(() => {
+        setEditing(p);
+        setTimeout(() => window.scrollTo({ top: 0, behavior: "instant" }), 0);
+      }, 50);
+    } else {
+      setShowForm(false);
+      setEditing(p);
+      setTimeout(() => window.scrollTo({ top: 0, behavior: "instant" }), 0);
+    }
   }
 
   function startAdd() {
-    setShowForm(true);
+    savedScrollY.current = window.scrollY;
     setEditing(null);
-    setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 50);
+    setShowForm(true);
+    // Ekleme formunu görünür alana getir
+    setTimeout(() => window.scrollTo({ top: 0, behavior: "instant" }), 0);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditing(null);
+    // Form kapandıktan sonra kaydedilen scroll pozisyonuna geri dön
+    setTimeout(() => window.scrollTo({ top: savedScrollY.current, behavior: "instant" }), 0);
   }
 
   async function del(id: string) {
@@ -1234,16 +1258,16 @@ export function ProductCatalogClient() {
 
       {(showForm) && (
         <ProductForm
-          onSave={() => { setShowForm(false); load(); }}
-          onCancel={() => setShowForm(false)}
+          onSave={() => { closeForm(); load(); }}
+          onCancel={closeForm}
         />
       )}
 
       {editing && (
         <ProductForm
           initial={editing}
-          onSave={() => { setEditing(null); load(); }}
-          onCancel={() => setEditing(null)}
+          onSave={() => { closeForm(); load(); }}
+          onCancel={closeForm}
         />
       )}
 

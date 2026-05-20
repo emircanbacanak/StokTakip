@@ -9,30 +9,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No image provided' }, { status: 400 });
     }
 
-    // remove.bg API'ye gönder
-    const removeBgFormData = new FormData();
-    removeBgFormData.append('image_file', imageFile);
-    removeBgFormData.append('size', 'auto');
+    const bytes = await imageFile.arrayBuffer();
+    const base64 = Buffer.from(bytes).toString('base64');
+    const mimeType = imageFile.type || 'image/jpeg';
 
-    const response = await fetch('https://api.remove.bg/v1.0/removebg', {
+    // withoutBG API'ye gönder (base64 endpoint)
+    const response = await fetch('https://api.withoutbg.com/v1.0/image-without-background-base64', {
       method: 'POST',
       headers: {
-        'X-Api-Key': process.env.REMOVE_BG_API_KEY || '',
+        'Content-Type': 'application/json',
+        'X-API-Key': process.env.WITHOUTBG_API_KEY || '',
       },
-      body: removeBgFormData,
+      body: JSON.stringify({
+        image_base64: base64,
+        image_mime_type: mimeType,
+      }),
     });
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('remove.bg API error:', error);
+      console.error('withoutBG API error:', error);
       return NextResponse.json({ error: 'Background removal failed' }, { status: response.status });
     }
 
-    // Blob'u base64'e çevir
-    const blob = await response.blob();
-    const buffer = await blob.arrayBuffer();
-    const base64 = Buffer.from(buffer).toString('base64');
-    const dataUrl = `data:image/png;base64,${base64}`;
+    const data = await response.json();
+    const resultBase64 = data.img_without_background_base64;
+    const resultMimeType = data.image_mime_type || 'image/png';
+    const dataUrl = `data:${resultMimeType};base64,${resultBase64}`;
 
     return NextResponse.json({ imageUrl: dataUrl });
   } catch (error) {
