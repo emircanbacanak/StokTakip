@@ -168,17 +168,17 @@ export function calculateProductCost(
       enabled: settings.depreciation_enabled,
     },
     {
-      label: `Mumluk Ücreti (${settings.candleholder_cost_per_unit} TL/adet)`,
+      label: `Pilli mum (${settings.candleholder_cost_per_unit} TL/adet)`,
       value: candleholderCost,
       enabled: isCandleholder && settings.candleholder_enabled,
     },
     {
-      label: `Zincir Ücreti (${settings.keychain_cost_per_unit} TL/adet)`,
+      label: `Anahtar zinciri (${settings.keychain_cost_per_unit} TL/adet)`,
       value: keychainCost,
       enabled: isKeychain && settings.keychain_enabled,
     },
     {
-      label: `Sabunluk Ücreti (${settings.soapdish_cost_per_unit} TL/adet)`,
+      label: `Sabunluk Pompası (${settings.soapdish_cost_per_unit} TL/adet)`,
       value: soapdishCost,
       enabled: isSoapdish && settings.soapdish_enabled,
     },

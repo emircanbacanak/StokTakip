@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Plus, Trash2, ImageIcon, Loader2, Package, Pencil, X, Check, Scale, Ruler } from "lucide-react";
+import { Plus, Trash2, ImageIcon, Loader2, Package, Pencil, X, Check, Scale, Ruler, Image as ImageIcon2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/hooks/use-confirm";
 import type { Product, CostSettings, ProductSize } from "@/lib/types/database";
 import { calculateProductCost, DEFAULT_COST_SETTINGS } from "@/lib/cost-calculator";
 import { formatCurrency } from "@/lib/utils";
+import { ProductGallery } from "./product-gallery";
 
 const inputCls =
   "w-full bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all";
@@ -93,6 +94,15 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [isSpiceHolder, setIsSpiceHolder] = useState(initial?.is_spice_holder ?? false);
   const [isTowelHolder, setIsTowelHolder] = useState(initial?.is_towel_holder ?? false);
   const [isBrushHolder, setIsBrushHolder] = useState(initial?.is_brush_holder ?? false);
+  const [isPot, setIsPot] = useState(initial?.is_pot ?? false);
+  const [isToy, setIsToy] = useState(initial?.is_toy ?? false);
+  const [isDecor, setIsDecor] = useState(initial?.is_decor ?? false);
+  const [isHolder, setIsHolder] = useState(initial?.is_holder ?? false);
+  const [isGpuSupport, setIsGpuSupport] = useState(initial?.is_gpu_support ?? false);
+  const [isBookmark, setIsBookmark] = useState(initial?.is_bookmark ?? false);
+  const [isPencilHolder, setIsPencilHolder] = useState(initial?.is_pencil_holder ?? false);
+  const [isPlateHolder, setIsPlateHolder] = useState(initial?.is_plate_holder ?? false);
+  const [isOrganizer, setIsOrganizer] = useState(initial?.is_organizer ?? false);
   const [sizes, setSizes] = useState<Array<{ id?: string; size_name: string; weight_grams: string }>>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(initial?.image_url ?? null);
   const [originalImage, setOriginalImage] = useState<string | null>(initial?.image_url ?? null);
@@ -106,6 +116,15 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
   const [manualSoapdishOverride, setManualSoapdishOverride] = useState(false);
   const [manualSolidSoapDishOverride, setManualSolidSoapDishOverride] = useState(false);
   const [manualSizeOverride, setManualSizeOverride] = useState(false);
+  const [manualPotOverride, setManualPotOverride] = useState(false);
+  const [manualToyOverride, setManualToyOverride] = useState(false);
+  const [manualDecorOverride, setManualDecorOverride] = useState(false);
+  const [manualHolderOverride, setManualHolderOverride] = useState(false);
+  const [manualGpuSupportOverride, setManualGpuSupportOverride] = useState(false);
+  const [manualBookmarkOverride, setManualBookmarkOverride] = useState(false);
+  const [manualPencilHolderOverride, setManualPencilHolderOverride] = useState(false);
+  const [manualPlateHolderOverride, setManualPlateHolderOverride] = useState(false);
+  const [manualOrganizerOverride, setManualOrganizerOverride] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -180,6 +199,111 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       // Fırçalık
       const hasBrushHolder = nameLower.includes('fırçalık') || nameLower.includes('brush holder');
       if (hasBrushHolder !== isBrushHolder) setIsBrushHolder(hasBrushHolder);
+
+      // Saksılar
+      if (!manualPotOverride) {
+        const hasPot = nameLower.includes('saksı') || nameLower.includes('pot') || nameLower.includes('planter');
+        if (hasPot !== isPot) setIsPot(hasPot);
+      }
+
+      // GPU Destekleri
+      if (!manualGpuSupportOverride) {
+        const hasGpuSupport = nameLower.includes('gpu desteği') || nameLower.includes('gpu destek') || nameLower.includes('gpu support');
+        if (hasGpuSupport !== isGpuSupport) setIsGpuSupport(hasGpuSupport);
+      }
+
+      // Kitap Ayraçları
+      if (!manualBookmarkOverride) {
+        const hasBookmark = nameLower.includes('kitap ayracı') || nameLower.includes('kitap ayraci') || nameLower.includes('bookmark');
+        if (hasBookmark !== isBookmark) setIsBookmark(hasBookmark);
+      }
+
+      // Kalemlikler
+      if (!manualPencilHolderOverride) {
+        const hasPencilHolder = nameLower.includes('kalemlik') || nameLower.includes('pencil holder');
+        if (hasPencilHolder !== isPencilHolder) setIsPencilHolder(hasPencilHolder);
+      }
+
+      // Plakalıklar
+      if (!manualPlateHolderOverride) {
+        const hasPlateHolder = (nameLower.includes('plakalık') || nameLower.includes('plaka') || nameLower.includes('plakalik')) && !nameLower.includes('anahtarlık');
+        if (hasPlateHolder !== isPlateHolder) setIsPlateHolder(hasPlateHolder);
+      }
+
+      // Düzenleyiciler
+      if (!manualOrganizerOverride) {
+        const hasOrganizer = nameLower.includes('düzenleyici') || nameLower.includes('organizer') || nameLower.includes('duzenleyici');
+        if (hasOrganizer !== isOrganizer) setIsOrganizer(hasOrganizer);
+      }
+
+      // Tutacaklar
+      if (!manualHolderOverride) {
+        const hasHolder = (nameLower.includes('tutacak') || nameLower.includes('holder') || nameLower.includes('stand')) && !nameLower.includes('gpu');
+        if (hasHolder !== isHolder) setIsHolder(hasHolder);
+      }
+
+      // Oyuncaklar
+      if (!manualToyOverride) {
+        const hasToy = (
+          nameLower.includes('oyuncak') || 
+          nameLower.includes('toy') || 
+          nameLower.includes('axolotl') || 
+          nameLower.includes('dragon') || 
+          nameLower.includes('ejderha') || 
+          nameLower.includes('ahtapot') || 
+          nameLower.includes('pokemon') || 
+          nameLower.includes('pikachu') || 
+          nameLower.includes('bulbasaur') || 
+          nameLower.includes('squirtle') || 
+          nameLower.includes('timsah') || 
+          nameLower.includes('tavşan') || 
+          nameLower.includes('tilki') || 
+          nameLower.includes('örümcek') || 
+          nameLower.includes('uzaylı') || 
+          nameLower.includes('katana') || 
+          nameLower.includes('karambit') || 
+          nameLower.includes('articulated') || 
+          nameLower.includes('flexi')
+        ) && !nameLower.includes('dekor') && !nameLower.includes('biblo') && !nameLower.includes('mumluk') && !nameLower.includes('anahtarlık');
+        if (hasToy !== isToy) setIsToy(hasToy);
+      }
+
+      // Dekorlar
+      if (!manualDecorOverride) {
+        const hasDecor = (
+          nameLower.includes('dekor') || 
+          nameLower.includes('biblo') || 
+          nameLower.includes('heykel') || 
+          nameLower.includes('duvar') || 
+          nameLower.includes('figür') || 
+          nameLower.includes('panter') || 
+          nameLower.includes('büst') || 
+          nameLower.includes('süs') || 
+          nameLower.includes('gül') || 
+          nameLower.includes('zambak') || 
+          nameLower.includes('güvercin') || 
+          nameLower.includes('kuş') || 
+          nameLower.includes('kurt') || 
+          nameLower.includes('papatya') || 
+          nameLower.includes('salyangoz') || 
+          nameLower.includes('samuray') || 
+          nameLower.includes('yel değirmeni') ||
+          nameLower.includes('tavan') ||
+          (nameLower.includes('ayıcık') && nameLower.includes('dekor')) ||
+          (nameLower.includes('tilki') && nameLower.includes('dekor')) ||
+          (nameLower.includes('köpek') && nameLower.includes('dekor'))
+        ) && 
+        !nameLower.includes('oyuncak') && 
+        !nameLower.includes('saksı') && 
+        !nameLower.includes('kitap ayracı') && 
+        !nameLower.includes('kalemlik') && 
+        !nameLower.includes('plaka') && 
+        !nameLower.includes('düzenleyici') && 
+        !nameLower.includes('tutacak') && 
+        !nameLower.includes('mumluk') && 
+        !nameLower.includes('anahtarlık');
+        if (hasDecor !== isDecor) setIsDecor(hasDecor);
+      }
     }
 
     // Vazo otomatik algılama - sadece yeni ürün eklerken ve manuel değişiklik yapılmadıysa
@@ -195,7 +319,13 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
         ]);
       }
     }
-  }, [name, isCandleholder, isKeychain, isSoapdish, isSolidSoapDish, isSugarBowl, isSnackBowl, isFruitBowl, isContainer, isStrainer, isSpiceHolder, isTowelHolder, isBrushHolder, hasSizes, manualCandleholderOverride, manualKeychainOverride, manualSoapdishOverride, manualSolidSoapDishOverride, manualSizeOverride, initial]);
+  }, [
+    name, isCandleholder, isKeychain, isSoapdish, isSolidSoapDish, isSugarBowl, isSnackBowl, isFruitBowl, isContainer, isStrainer, isSpiceHolder, isTowelHolder, isBrushHolder,
+    isPot, isToy, isDecor, isHolder, isGpuSupport, isBookmark, isPencilHolder, isPlateHolder, isOrganizer,
+    hasSizes, manualCandleholderOverride, manualKeychainOverride, manualSoapdishOverride, manualSolidSoapDishOverride, manualSizeOverride,
+    manualPotOverride, manualToyOverride, manualDecorOverride, manualHolderOverride, manualGpuSupportOverride, manualBookmarkOverride, manualPencilHolderOverride, manualPlateHolderOverride, manualOrganizerOverride,
+    initial
+  ]);
 
   // Mevcut boyutları yükle
   useEffect(() => {
@@ -381,6 +511,15 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
       is_spice_holder: isSpiceHolder,
       is_towel_holder: isTowelHolder,
       is_brush_holder: isBrushHolder,
+      is_pot: isPot,
+      is_toy: isToy,
+      is_decor: isDecor,
+      is_holder: isHolder,
+      is_gpu_support: isGpuSupport,
+      is_bookmark: isBookmark,
+      is_pencil_holder: isPencilHolder,
+      is_plate_holder: isPlateHolder,
+      is_organizer: isOrganizer,
     };
 
     let dbError: any = null;
@@ -776,6 +915,48 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
         </label>
       </div>
 
+      {/* Diğer Kategoriler Seçimi */}
+      <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+        <div className="flex items-center gap-1.5 border-b border-border pb-2">
+          <Package className="w-4 h-4 text-blue-500" />
+          <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ürün Kategorileri</span>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { label: "Şekerlik 🍬", checked: isSugarBowl, onChange: (val: boolean) => { setIsSugarBowl(val); } },
+            { label: "Çerezlik 🥜", checked: isSnackBowl, onChange: (val: boolean) => { setIsSnackBowl(val); } },
+            { label: "Meyvelik 🍎", checked: isFruitBowl, onChange: (val: boolean) => { setIsFruitBowl(val); } },
+            { label: "Kap 🥣", checked: isContainer, onChange: (val: boolean) => { setIsContainer(val); } },
+            { label: "Süzgeç 🥄", checked: isStrainer, onChange: (val: boolean) => { setIsStrainer(val); } },
+            { label: "Baharatlık 🌶️", checked: isSpiceHolder, onChange: (val: boolean) => { setIsSpiceHolder(val); } },
+            { label: "Havluluk 🧺", checked: isTowelHolder, onChange: (val: boolean) => { setIsTowelHolder(val); } },
+            { label: "Fırçalık 🪥", checked: isBrushHolder, onChange: (val: boolean) => { setIsBrushHolder(val); } },
+            { label: "Saksı 🪴", checked: isPot, onChange: (val: boolean) => { setIsPot(val); setManualPotOverride(true); } },
+            { label: "Oyuncak 🧸", checked: isToy, onChange: (val: boolean) => { setIsToy(val); setManualToyOverride(true); } },
+            { label: "Dekor 🎨", checked: isDecor, onChange: (val: boolean) => { setIsDecor(val); setManualDecorOverride(true); } },
+            { label: "Tutacak 📎", checked: isHolder, onChange: (val: boolean) => { setIsHolder(val); setManualHolderOverride(true); } },
+            { label: "GPU Desteği 🖥️", checked: isGpuSupport, onChange: (val: boolean) => { setIsGpuSupport(val); setManualGpuSupportOverride(true); } },
+            { label: "Kitap Ayracı 🔖", checked: isBookmark, onChange: (val: boolean) => { setIsBookmark(val); setManualBookmarkOverride(true); } },
+            { label: "Kalemlik ✏️", checked: isPencilHolder, onChange: (val: boolean) => { setIsPencilHolder(val); setManualPencilHolderOverride(true); } },
+            { label: "Plakalık 🏷️", checked: isPlateHolder, onChange: (val: boolean) => { setIsPlateHolder(val); setManualPlateHolderOverride(true); } },
+            { label: "Düzenleyici 🗃️", checked: isOrganizer, onChange: (val: boolean) => { setIsOrganizer(val); setManualOrganizerOverride(true); } },
+          ].map((cat, idx) => (
+            <label key={idx} className="flex items-center gap-2 cursor-pointer hover:bg-muted/30 p-1.5 rounded-lg transition-colors">
+              <input
+                type="checkbox"
+                checked={cat.checked}
+                onChange={(e) => cat.onChange(e.target.checked)}
+                className="w-4 h-4 rounded border-border text-blue-500 focus:ring-2 focus:ring-blue-500/50"
+              />
+              <span className="text-xs text-foreground font-medium">{cat.label}</span>
+            </label>
+          ))}
+        </div>
+        <p className="text-[10px] text-muted-foreground pt-1 border-t border-border/50">
+          * İşaretlenmeyen tüm ürünler varsayılan olarak <strong>Vazolar 🏺</strong> kategorisinde listelenir.
+        </p>
+      </div>
+
       {/* Maliyet Önizlemesi */}
       {costSettings && (
         <>
@@ -906,8 +1087,9 @@ export function ProductCatalogClient() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
+  const [galleryProductId, setGalleryProductId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "no-image">("all");
-  const [categoryFilter, setCategoryFilter] = useState<"all" | "candleholder" | "keychain" | "vase" | "soapdish" | "solid-soap-dish" | "sugar-bowl" | "snack-bowl" | "fruit-bowl" | "container" | "strainer" | "spice-holder" | "towel-holder" | "brush-holder">("all");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "candleholder" | "keychain" | "vase" | "soapdish" | "solid-soap-dish" | "sugar-bowl" | "snack-bowl" | "fruit-bowl" | "container" | "strainer" | "spice-holder" | "towel-holder" | "brush-holder" | "pot" | "toy" | "decor" | "holder" | "gpu-support" | "bookmark" | "pencil-holder" | "plate-holder" | "organizer">("all");
   const { toast } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const topRef = useRef<HTMLDivElement>(null);
@@ -919,12 +1101,10 @@ export function ProductCatalogClient() {
     if (error) {
       console.error("Ürünler yüklenirken hata:", error);
     }
-    // Resimlere cache busting ekle
-    const productsWithCacheBust = (data ?? []).map(p => ({
-      ...p,
-      image_url: p.image_url ? `${p.image_url}?t=${Date.now()}` : null
-    }));
-    setProducts(productsWithCacheBust);
+    // Veritabanındaki URL'ler zaten upload esnasında cache-busting parametresi alıyor.
+    // Burada tekrar dinamik timestamp eklemek tarayıcı önbelleğini her yüklemede bozarak
+    // 221 ürünün resminin sürekli baştan indirilmesine ve sistemin donmasına yol açıyordu.
+    setProducts(data ?? []);
     setLoading(false);
   }, []);
 
@@ -1011,11 +1191,31 @@ export function ProductCatalogClient() {
     filteredProducts = filteredProducts.filter(p => p.is_towel_holder);
   } else if (categoryFilter === "brush-holder") {
     filteredProducts = filteredProducts.filter(p => p.is_brush_holder);
+  } else if (categoryFilter === "pot") {
+    filteredProducts = filteredProducts.filter(p => p.is_pot);
+  } else if (categoryFilter === "toy") {
+    filteredProducts = filteredProducts.filter(p => p.is_toy);
+  } else if (categoryFilter === "decor") {
+    filteredProducts = filteredProducts.filter(p => p.is_decor);
+  } else if (categoryFilter === "holder") {
+    filteredProducts = filteredProducts.filter(p => p.is_holder);
+  } else if (categoryFilter === "gpu-support") {
+    filteredProducts = filteredProducts.filter(p => p.is_gpu_support);
+  } else if (categoryFilter === "bookmark") {
+    filteredProducts = filteredProducts.filter(p => p.is_bookmark);
+  } else if (categoryFilter === "pencil-holder") {
+    filteredProducts = filteredProducts.filter(p => p.is_pencil_holder);
+  } else if (categoryFilter === "plate-holder") {
+    filteredProducts = filteredProducts.filter(p => p.is_plate_holder);
+  } else if (categoryFilter === "organizer") {
+    filteredProducts = filteredProducts.filter(p => p.is_organizer);
   } else if (categoryFilter === "vase") {
     filteredProducts = filteredProducts.filter(p => 
       !p.is_candleholder && !p.is_keychain && !p.is_soapdish && !p.is_solid_soap_dish &&
       !p.is_sugar_bowl && !p.is_snack_bowl && !p.is_fruit_bowl && !p.is_container && !p.is_strainer &&
-      !p.is_spice_holder && !p.is_towel_holder && !p.is_brush_holder
+      !p.is_spice_holder && !p.is_towel_holder && !p.is_brush_holder &&
+      !p.is_pot && !p.is_toy && !p.is_decor && !p.is_holder && !p.is_gpu_support &&
+      !p.is_bookmark && !p.is_pencil_holder && !p.is_plate_holder && !p.is_organizer
     );
   }
   
@@ -1032,10 +1232,23 @@ export function ProductCatalogClient() {
   const spiceHolderCount = products.filter(p => p.is_spice_holder).length;
   const towelHolderCount = products.filter(p => p.is_towel_holder).length;
   const brushHolderCount = products.filter(p => p.is_brush_holder).length;
+  
+  const potCount = products.filter(p => p.is_pot).length;
+  const toyCount = products.filter(p => p.is_toy).length;
+  const decorCount = products.filter(p => p.is_decor).length;
+  const holderCount = products.filter(p => p.is_holder).length;
+  const gpuSupportCount = products.filter(p => p.is_gpu_support).length;
+  const bookmarkCount = products.filter(p => p.is_bookmark).length;
+  const pencilHolderCount = products.filter(p => p.is_pencil_holder).length;
+  const plateHolderCount = products.filter(p => p.is_plate_holder).length;
+  const organizerCount = products.filter(p => p.is_organizer).length;
+
   const vaseCount = products.filter(p => 
     !p.is_candleholder && !p.is_keychain && !p.is_soapdish && !p.is_solid_soap_dish &&
     !p.is_sugar_bowl && !p.is_snack_bowl && !p.is_fruit_bowl && !p.is_container && !p.is_strainer &&
-    !p.is_spice_holder && !p.is_towel_holder && !p.is_brush_holder
+    !p.is_spice_holder && !p.is_towel_holder && !p.is_brush_holder &&
+    !p.is_pot && !p.is_toy && !p.is_decor && !p.is_holder && !p.is_gpu_support &&
+    !p.is_bookmark && !p.is_pencil_holder && !p.is_plate_holder && !p.is_organizer
   ).length;
 
   return (
@@ -1240,6 +1453,114 @@ export function ProductCatalogClient() {
                 🪥 Fırçalıklar ({brushHolderCount})
               </button>
             )}
+            {potCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("pot")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "pot"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🪴 Saksılar ({potCount})
+              </button>
+            )}
+            {toyCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("toy")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "toy"
+                    ? "bg-amber-500 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🧸 Oyuncaklar ({toyCount})
+              </button>
+            )}
+            {decorCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("decor")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "decor"
+                    ? "bg-pink-600 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🎨 Dekorlar ({decorCount})
+              </button>
+            )}
+            {holderCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("holder")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "holder"
+                    ? "bg-neutral-600 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                📎 Tutacaklar ({holderCount})
+              </button>
+            )}
+            {gpuSupportCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("gpu-support")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "gpu-support"
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🖥️ GPU Destekleri ({gpuSupportCount})
+              </button>
+            )}
+            {bookmarkCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("bookmark")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "bookmark"
+                    ? "bg-red-600 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🔖 Kitap Ayraçları ({bookmarkCount})
+              </button>
+            )}
+            {pencilHolderCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("pencil-holder")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "pencil-holder"
+                    ? "bg-yellow-600 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                ✏️ Kalemlikler ({pencilHolderCount})
+              </button>
+            )}
+            {plateHolderCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("plate-holder")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "plate-holder"
+                    ? "bg-teal-600 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🏷️ Plakalıklar ({plateHolderCount})
+              </button>
+            )}
+            {organizerCount > 0 && (
+              <button
+                onClick={() => setCategoryFilter("organizer")}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+                  categoryFilter === "organizer"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                🗃️ Düzenleyiciler ({organizerCount})
+              </button>
+            )}
             {vaseCount > 0 && (
               <button
                 onClick={() => setCategoryFilter("vase")}
@@ -1260,6 +1581,13 @@ export function ProductCatalogClient() {
         <ProductForm
           onSave={() => { closeForm(); load(); }}
           onCancel={closeForm}
+        />
+      )}
+
+      {galleryProductId && (
+        <ProductGallery 
+          productId={galleryProductId} 
+          onClose={() => setGalleryProductId(null)} 
         />
       )}
 
@@ -1316,6 +1644,13 @@ export function ProductCatalogClient() {
                 {/* Actions overlay - sadece desktop hover'da */}
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:flex items-center justify-center gap-2">
                   <button
+                    onClick={() => { setGalleryProductId(p.id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                    className="w-8 h-8 bg-violet-500/90 rounded-lg flex items-center justify-center text-white hover:bg-violet-500 transition-colors"
+                    title="Galeri (Çoklu Resim)"
+                  >
+                    <ImageIcon2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
                     onClick={() => { startEdit(p); }}
                     className="w-8 h-8 bg-card/90 dark:bg-card/90 rounded-lg flex items-center justify-center text-foreground hover:bg-card transition-colors border border-border"
                   >
@@ -1345,6 +1680,12 @@ export function ProductCatalogClient() {
                 ) : null}
                 {/* Mobil butonlar */}
                 <div className="flex gap-2 mt-2 sm:hidden">
+                  <button
+                    onClick={() => { setGalleryProductId(p.id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-violet-500/30 text-xs font-medium text-violet-500 hover:bg-violet-500/10 transition-colors"
+                  >
+                    <ImageIcon2 className="w-3 h-3" /> Galeri
+                  </button>
                   <button
                     onClick={() => startEdit(p)}
                     className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-muted transition-colors"

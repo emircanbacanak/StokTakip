@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Keep an explicit turbopack config object so Next's validator is satisfied.
+  // Use an empty object to allow Turbopack to run while keeping custom webpack.
   turbopack: {},
   experimental: {
     serverActions: {

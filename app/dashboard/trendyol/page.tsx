@@ -1,5 +1,5 @@
-import { TrendyolCalculatorClient } from "@/components/trendyol/trendyol-calculator-client";
+import { TrendyolTabs } from "@/components/trendyol/trendyol-tabs";
 
 export default function TrendyolPage() {
-  return <TrendyolCalculatorClient />;
+  return <TrendyolTabs />;
 }

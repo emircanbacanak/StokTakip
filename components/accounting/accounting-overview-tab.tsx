@@ -91,14 +91,72 @@ export function AccountingOverviewTab() {
     const sb = createClient();
     async function load() {
       setLoading(true);
-      const { data } = await sb.from("orders").select(`
-        id, created_at, total_amount, paid_amount, status,
-        buyer:buyers(id, name),
-        items:order_items(id, product_name, quantity, unit_price, produced_quantity, size_name),
-        deliveries(id, delivery_date, notes),
-        payments(id, amount, payment_date, payment_method, notes)
-      `).order("created_at", { ascending: false });
-      setAllOrders((data as unknown as RawOrder[]) ?? []);
+      const { data: ordersData, error: ordersError } = await sb
+        .from("orders")
+        .select("id, created_at, total_amount, paid_amount, status, buyer_id")
+        .order("created_at", { ascending: false });
+
+      if (ordersError) throw ordersError;
+
+      const orderIds = Array.from(new Set((ordersData || []).map((order: any) => order.id).filter(Boolean)));
+      const buyerIds = Array.from(new Set((ordersData || []).map((order: any) => order.buyer_id).filter(Boolean)));
+
+      const itemsMap: Record<string, any[]> = {};
+      const deliveriesMap: Record<string, any[]> = {};
+      const paymentsMap: Record<string, any[]> = {};
+      let buyersMap: Record<string, { id: string; name: string }> = {};
+
+      if (orderIds.length > 0) {
+        const { data: itemsData, error: itemsError } = await sb
+          .from("order_items")
+          .select("id, order_id, product_name, quantity, unit_price, produced_quantity, size_name")
+          .in("order_id", orderIds);
+        if (itemsError) throw itemsError;
+
+        (itemsData || []).forEach((item: any) => {
+          if (!itemsMap[item.order_id]) itemsMap[item.order_id] = [];
+          itemsMap[item.order_id].push(item);
+        });
+
+        const { data: deliveriesData, error: deliveriesError } = await sb
+          .from("deliveries")
+          .select("id, order_id, delivery_date, notes")
+          .in("order_id", orderIds);
+        if (deliveriesError) throw deliveriesError;
+
+        (deliveriesData || []).forEach((delivery: any) => {
+          if (!deliveriesMap[delivery.order_id]) deliveriesMap[delivery.order_id] = [];
+          deliveriesMap[delivery.order_id].push(delivery);
+        });
+
+        const { data: paymentsData, error: paymentsError } = await sb
+          .from("payments")
+          .select("id, order_id, amount, payment_date, payment_method, notes")
+          .in("order_id", orderIds);
+        if (paymentsError) throw paymentsError;
+
+        (paymentsData || []).forEach((payment: any) => {
+          if (!paymentsMap[payment.order_id]) paymentsMap[payment.order_id] = [];
+          paymentsMap[payment.order_id].push(payment);
+        });
+      }
+
+      if (buyerIds.length > 0) {
+        const { data: buyersData, error: buyersError } = await sb
+          .from("buyers")
+          .select("id, name")
+          .in("id", buyerIds);
+        if (buyersError) throw buyersError;
+        buyersMap = Object.fromEntries((buyersData || []).map((buyer: any) => [buyer.id, { id: buyer.id, name: buyer.name }]));
+      }
+
+      setAllOrders((ordersData || []).map((order: any) => ({
+        ...order,
+        items: itemsMap[order.id] || [],
+        deliveries: deliveriesMap[order.id] || [],
+        payments: paymentsMap[order.id] || [],
+        buyer: buyersMap[order.buyer_id] ?? { id: order.buyer_id ?? "", name: "Bilinmeyen" },
+      })) as unknown as RawOrder[]);
       setLoading(false);
     }
     load();

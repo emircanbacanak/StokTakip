@@ -103,18 +103,45 @@ export function CostAnalysisTab() {
       // Siparişleri yükle
       const { data: ordersData, error: ordersError } = await supabase
         .from("orders")
-        .select(`
-          id,
-          created_at,
-          total_amount,
-          buyer:buyers(id, name),
-          items:order_items(id, product_name, quantity, produced_quantity, unit_price, size_name, includes_candle)
-        `)
+        .select("id, created_at, total_amount, buyer_id")
         .order("created_at", { ascending: false })
         .limit(50);
 
       if (ordersError) throw ordersError;
-      setOrders(ordersData as any);
+
+      const orderIds = Array.from(new Set((ordersData || []).map((order: any) => order.id).filter(Boolean)));
+      const buyerIds = Array.from(new Set((ordersData || []).map((order: any) => order.buyer_id).filter(Boolean)));
+
+      const itemsMap: Record<string, any[]> = {};
+      if (orderIds.length > 0) {
+        const { data: itemsData, error: itemsError } = await supabase
+          .from("order_items")
+          .select("id, order_id, product_name, quantity, produced_quantity, unit_price, size_name, includes_candle")
+          .in("order_id", orderIds);
+
+        if (itemsError) throw itemsError;
+        (itemsData || []).forEach((item: any) => {
+          if (!itemsMap[item.order_id]) itemsMap[item.order_id] = [];
+          itemsMap[item.order_id].push(item);
+        });
+      }
+
+      let buyersMap: Record<string, { id: string; name: string }> = {};
+      if (buyerIds.length > 0) {
+        const { data: buyersData, error: buyersError } = await supabase
+          .from("buyers")
+          .select("id, name")
+          .in("id", buyerIds);
+
+        if (buyersError) throw buyersError;
+        buyersMap = Object.fromEntries((buyersData || []).map((buyer: any) => [buyer.id, { id: buyer.id, name: buyer.name }]));
+      }
+
+      setOrders((ordersData || []).map((order: any) => ({
+        ...order,
+        items: itemsMap[order.id] || [],
+        buyer: buyersMap[order.buyer_id] ?? { id: order.buyer_id ?? "", name: "Bilinmeyen" },
+      })) as any);
 
       // Ürünleri yükle (mumluk, anahtarlık ve sabunluk bilgisi dahil)
       const { data: productsData, error: productsError } = await supabase
@@ -158,10 +185,11 @@ export function CostAnalysisTab() {
       
       setSettings(settingsData);
     } catch (error) {
-      console.error("Veri yüklenirken hata:", error);
+      const msg = error && (error as any).message ? (error as any).message : String(error);
+      console.error("Veri yüklenirken hata:", error, msg);
       toast({
         title: "Hata",
-        description: "Veriler yüklenemedi",
+        description: `Veriler yüklenemedi${msg ? `: ${msg}` : ''}`,
         variant: "destructive",
       });
     } finally {

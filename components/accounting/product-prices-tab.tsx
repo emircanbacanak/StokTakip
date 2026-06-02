@@ -7,6 +7,8 @@ import type { Product, ProductSize, CostSettings } from "@/lib/types/database";
 import { Loader2, Save, DollarSign, Package, Info, Check, BookOpen, Download, X } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { calculateProductCost } from "@/lib/cost-calculator";
+import type { TrendyolPricingSettings } from "@/lib/trendyol-pricing";
+import { calcTrendyolPrice, DEFAULT_TRENDYOL_PRICING_SETTINGS, calcTrendyolBreakdownAtPrice } from "@/lib/trendyol-pricing";
 import jsPDF from "jspdf";
 
 interface ProductRow {
@@ -17,7 +19,10 @@ interface ProductRow {
   weightGrams: number;
   currentPrice: number | null;
   suggestedPrice: number;
+  trendyolRecommendedPrice: number;
+  trendyolExactPrice: number;
   isSized: boolean;
+  appliedCostSettings: CostSettings;
   costBreakdown: {
     filament: number;
     electricity: number;
@@ -29,17 +34,64 @@ interface ProductRow {
   };
 }
 
+function getEffectiveCostSettings(
+  costSettings: CostSettings,
+  trendyolSettings: TrendyolPricingSettings
+): CostSettings {
+  return {
+    ...costSettings,
+    filament_price_per_kg: trendyolSettings.filamentPricePerKg,
+    electricity_cost_per_gram: trendyolSettings.electricityCostPerGram,
+    depreciation_cost_per_gram: trendyolSettings.depreciationCostPerGram,
+    waste_percentage: trendyolSettings.wastePercentage,
+    candleholder_cost_per_unit: trendyolSettings.candleholderCostPerUnit,
+    keychain_cost_per_unit: trendyolSettings.keychainCostPerUnit,
+    soapdish_cost_per_unit: trendyolSettings.soapdishCostPerUnit,
+  } as CostSettings;
+}
+
 export function ProductPricesTab() {
   const [products, setProducts] = useState<Product[]>([]);
   const [productSizes, setProductSizes] = useState<ProductSize[]>([]);
   const [costSettings, setCostSettings] = useState<CostSettings | null>(null);
+  const [trendyolSettings, setTrendyolSettings] = useState(DEFAULT_TRENDYOL_PRICING_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [initializing, setInitializing] = useState(false);
   const [showCatalog, setShowCatalog] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const { toast } = useToast();
+
+  const getProductionCostLabel = (row: ProductRow) => {
+    const extraLabels: string[] = [];
+    if (row.costBreakdown.candleholder > 0) extraLabels.push("Pilli mum");
+    if (row.costBreakdown.keychain > 0) extraLabels.push("Anahtar zinciri");
+    if (row.costBreakdown.soapdish > 0) extraLabels.push("Sabunluk Pompası");
+    return extraLabels.length > 0 ? ` (+ ${extraLabels.join(" + ")})` : "";
+  };
+
+  useEffect(() => {
+    if (showCatalog) {
+      const activeCategories = Object.keys(groupProductsByCategory());
+      setSelectedCategories(activeCategories);
+    }
+  }, [showCatalog]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("trendyolSettings");
+      if (saved) {
+        setTrendyolSettings({
+          ...DEFAULT_TRENDYOL_PRICING_SETTINGS,
+          ...JSON.parse(saved),
+        });
+      }
+    } catch {
+      // ignore invalid localStorage
+    }
+  }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -72,10 +124,11 @@ export function ProductPricesTab() {
       setProductSizes(sizesData || []);
       setCostSettings(settingsData);
     } catch (error) {
-      console.error("Veri yüklenirken hata:", error);
+      const msg = error && (error as any).message ? (error as any).message : String(error);
+      console.error("Veri yüklenirken hata:", error, msg);
       toast({
         title: "Hata",
-        description: "Veriler yüklenemedi",
+        description: `Veriler yüklenemedi${msg ? `: ${msg}` : ''}`,
         variant: "destructive",
       });
     } finally {
@@ -94,17 +147,19 @@ export function ProductPricesTab() {
 
     products.forEach(product => {
       if (product.has_sizes) {
+        const effectiveCostSettings = getEffectiveCostSettings(costSettings, trendyolSettings);
         const sizes = productSizes.filter(s => s.product_id === product.id);
         sizes.forEach(size => {
           const calc = calculateProductCost(
             size.weight_grams,
-            costSettings,
+            effectiveCostSettings,
             product.is_candleholder,
             product.is_keychain,
             product.is_soapdish
           );
 
           const suggestedPrice = calc.totalCost * 1.4;
+          const trendyol = calcTrendyolPrice(calc.totalCost, size.weight_grams, trendyolSettings);
 
           rows.push({
             productId: product.id,
@@ -114,28 +169,33 @@ export function ProductPricesTab() {
             weightGrams: size.weight_grams,
             currentPrice: size.price, // Boyutlu ürünlerde size.price kullan
             suggestedPrice,
+            trendyolRecommendedPrice: trendyol.recommendedPrice,
+            trendyolExactPrice: trendyol.exactTargetPrice,
             isSized: true,
+            appliedCostSettings: effectiveCostSettings,
             costBreakdown: {
               filament: calc.rawFilamentCost,
               electricity: calc.electricityCost,
               depreciation: calc.depreciationCost,
-              candleholder: product.is_candleholder && costSettings.candleholder_enabled ? costSettings.candleholder_cost_per_unit : 0,
-              keychain: product.is_keychain && costSettings.keychain_enabled ? costSettings.keychain_cost_per_unit : 0,
-              soapdish: product.is_soapdish && costSettings.soapdish_enabled ? costSettings.soapdish_cost_per_unit : 0,
+              candleholder: product.is_candleholder && effectiveCostSettings.candleholder_enabled ? effectiveCostSettings.candleholder_cost_per_unit : 0,
+              keychain: product.is_keychain && effectiveCostSettings.keychain_enabled ? effectiveCostSettings.keychain_cost_per_unit : 0,
+              soapdish: product.is_soapdish && effectiveCostSettings.soapdish_enabled ? effectiveCostSettings.soapdish_cost_per_unit : 0,
               total: calc.totalCost,
             },
           });
         });
       } else {
+        const effectiveCostSettings = getEffectiveCostSettings(costSettings, trendyolSettings);
         const calc = calculateProductCost(
           product.weight_grams,
-          costSettings,
+          effectiveCostSettings,
           product.is_candleholder,
           product.is_keychain,
           product.is_soapdish
         );
 
         const suggestedPrice = calc.totalCost * 1.4;
+        const trendyol = calcTrendyolPrice(calc.totalCost, product.weight_grams, trendyolSettings);
 
         rows.push({
           productId: product.id,
@@ -143,14 +203,17 @@ export function ProductPricesTab() {
           weightGrams: product.weight_grams,
           currentPrice: product.price, // Boyutsuz ürünlerde product.price kullan
           suggestedPrice,
+          trendyolRecommendedPrice: trendyol.recommendedPrice,
+          trendyolExactPrice: trendyol.exactTargetPrice,
           isSized: false,
+          appliedCostSettings: effectiveCostSettings,
           costBreakdown: {
             filament: calc.rawFilamentCost,
             electricity: calc.electricityCost,
             depreciation: calc.depreciationCost,
-            candleholder: product.is_candleholder && costSettings.candleholder_enabled ? costSettings.candleholder_cost_per_unit : 0,
-            keychain: product.is_keychain && costSettings.keychain_enabled ? costSettings.keychain_cost_per_unit : 0,
-            soapdish: product.is_soapdish && costSettings.soapdish_enabled ? costSettings.soapdish_cost_per_unit : 0,
+            candleholder: product.is_candleholder && effectiveCostSettings.candleholder_enabled ? effectiveCostSettings.candleholder_cost_per_unit : 0,
+            keychain: product.is_keychain && effectiveCostSettings.keychain_enabled ? effectiveCostSettings.keychain_cost_per_unit : 0,
+            soapdish: product.is_soapdish && effectiveCostSettings.soapdish_enabled ? effectiveCostSettings.soapdish_cost_per_unit : 0,
             total: calc.totalCost,
           },
         });
@@ -324,34 +387,43 @@ export function ProductPricesTab() {
     if (product.is_spice_holder) return "Baharatlıklar";
     if (product.is_towel_holder) return "Havluluklar";
     if (product.is_brush_holder) return "Fırçalıklar";
+    if (product.is_pot) return "Saksılar";
+    if (product.is_toy) return "Oyuncaklar";
+    if (product.is_decor) return "Dekorlar";
+    if (product.is_holder) return "Tutacaklar";
+    if (product.is_gpu_support) return "GPU Destekleri";
+    if (product.is_bookmark) return "Kitap Ayraçları";
+    if (product.is_pencil_holder) return "Kalemlikler";
+    if (product.is_plate_holder) return "Plakalıklar";
+    if (product.is_organizer) return "Düzenleyiciler";
     
-    // Kategorize edilmemiş ürünler
-    const name = product.name.toLowerCase();
-    if (name.includes("vazo")) return "Vazolar";
-    if (name.includes("saksı")) return "Saksılar";
-    if (name.includes("tutacak")) return "Tutacaklar";
-    
-    return "Diğer Ürünler";
+    return "Vazolar";
   };
 
   const getCategoryEmoji = (categoryName: string): string => {
     const emojiMap: Record<string, string> = {
       "Mumluklar": "🕯️",
       "Anahtarlıklar": "🔑",
-      "Sıvı Sabunluklar": "🧴",
-      "Katı Sabunluklar": "🧼",
+      "Sıvı Sabunluklar": "🧼",
+      "Katı Sabunluklar": "🧴",
       "Şekerlikler": "🍬",
       "Çerezlikler": "🥜",
       "Meyvelikler": "🍎",
       "Kaplar": "🥣",
-      "Süzgeçler": "🔍",
+      "Süzgeçler": "🥄",
       "Baharatlıklar": "🌶️",
       "Havluluklar": "🧺",
       "Fırçalıklar": "🪥",
-      "Vazolar": "🏺",
       "Saksılar": "🪴",
-      "Tutacaklar": "🤏",
-      "Diğer Ürünler": "📦",
+      "Oyuncaklar": "🧸",
+      "Dekorlar": "🎨",
+      "Tutacaklar": "📎",
+      "GPU Destekleri": "🖥️",
+      "Kitap Ayraçları": "🔖",
+      "Kalemlikler": "✏️",
+      "Plakalıklar": "🏷️",
+      "Düzenleyiciler": "🗃️",
+      "Vazolar": "🏺",
     };
     return emojiMap[categoryName] || "📦";
   };
@@ -466,6 +538,11 @@ export function ProductPricesTab() {
       const groupedProducts = groupProductsByCategory();
       
       for (const [category, categoryRows] of Object.entries(groupedProducts)) {
+        // Seçilmeyen kategorileri pas geç
+        if (selectedCategories.length > 0 && !selectedCategories.includes(category)) {
+          continue;
+        }
+
         // Aynı ürünün farklı boyutlarını grupla
         const productGroups = groupProductSizes(categoryRows);
         
@@ -779,6 +856,10 @@ export function ProductPricesTab() {
 
   const hasUnpricedProducts = rows.some(r => r.currentPrice === null);
   const groupedProducts = groupProductsByCategory();
+  const allGroupedCategories = Object.keys(groupedProducts);
+  const totalSelectedProducts = Object.entries(groupedProducts)
+    .filter(([category]) => selectedCategories.includes(category))
+    .reduce((total, [_, categoryRows]) => total + categoryRows.length, 0);
 
   return (
     <div className="space-y-4">
@@ -852,7 +933,7 @@ export function ProductPricesTab() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={downloadCatalog}
-                  disabled={generatingPdf}
+                  disabled={generatingPdf || selectedCategories.length === 0}
                   className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {generatingPdf ? (
@@ -879,6 +960,70 @@ export function ProductPricesTab() {
 
             {/* Modal Content */}
             <div className="flex-1 overflow-y-auto p-6">
+              {/* Kategori Seçim Arayüzü */}
+              <div className="mb-8 bg-card border border-border/80 rounded-2xl p-5 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/50">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                      Kataloga Dahil Edilecek Kategorileri Seçin
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Seçtiğiniz kategoriler önizlemede ve indirilen PDF'te anında güncellenir.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCategories(allGroupedCategories)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
+                    >
+                      Tümünü Seç
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCategories([])}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-muted hover:bg-muted/80 text-muted-foreground transition-colors"
+                    >
+                      Seçimleri Temizle
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(groupedProducts).map(([category, categoryRows]) => {
+                    const isSelected = selectedCategories.includes(category);
+                    const emoji = getCategoryEmoji(category);
+                    return (
+                      <button
+                        key={category}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedCategories(prev => prev.filter(c => c !== category));
+                          } else {
+                            setSelectedCategories(prev => [...prev, category]);
+                          }
+                        }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+                          isSelected
+                            ? "bg-gradient-to-br from-blue-500/10 to-violet-600/10 border-blue-500 text-blue-600 shadow-sm"
+                            : "bg-muted/30 border-transparent text-muted-foreground hover:bg-muted/50 hover:border-border"
+                        }`}
+                      >
+                        <span className="text-sm">{emoji}</span>
+                        <span>{category}</span>
+                        <span className={`text-[10px] rounded-full px-1.5 py-0.5 ${
+                          isSelected ? "bg-blue-500/20 text-blue-600" : "bg-muted text-muted-foreground"
+                        }`}>
+                          {categoryRows.length}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div id="catalog-preview" className="space-y-8">
                 {/* Katalog Başlığı */}
                 <div className="text-center mb-12 p-8 bg-gradient-to-r from-blue-500 to-violet-600 rounded-2xl text-white">
@@ -890,85 +1035,104 @@ export function ProductPricesTab() {
                       day: 'numeric' 
                     })}
                   </p>
-                  <p className="text-sm opacity-80 mt-2">Toplam {products.length} Ürün</p>
+                  <p className="text-sm opacity-80 mt-2">
+                    {selectedCategories.length === allGroupedCategories.length ? (
+                      `Toplam ${products.length} Ürün`
+                    ) : (
+                      `Seçilen: ${totalSelectedProducts} Ürün (${selectedCategories.length} Kategori)`
+                    )}
+                  </p>
                 </div>
 
                 {/* Kategoriler */}
-                {Object.entries(groupedProducts).map(([category, categoryRows]) => (
-                  <div key={category} className="space-y-4">
-                    <div className="bg-muted/50 p-4 rounded-xl border-l-4 border-blue-500">
-                      <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
-                        <span>{getCategoryEmoji(category)}</span>
-                        <span>{category}</span>
-                        <span className="text-sm font-normal text-muted-foreground ml-2">
-                          ({categoryRows.length} ürün)
-                        </span>
-                      </h2>
+                {selectedCategories.length === 0 ? (
+                  <div className="text-center py-16 bg-muted/20 border border-dashed border-border rounded-2xl">
+                    <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center mx-auto mb-4">
+                      <BookOpen className="w-8 h-8 text-blue-500" />
                     </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                      {categoryRows.map((row) => {
-                        const key = row.sizeId || row.productId;
-                        const product = products.find(p => p.id === row.productId);
-                        const displayName = row.sizeName 
-                          ? `${row.productName} (${row.sizeName})`
-                          : row.productName;
-
-                        return (
-                          <div
-                            key={key}
-                            className="bg-card border border-border rounded-xl p-4 hover:shadow-lg transition-shadow"
-                          >
-                            {/* Ürün Resmi */}
-                            {product?.image_url ? (
-                              <img
-                                src={product.image_url}
-                                alt={displayName}
-                                className="w-full h-48 object-contain rounded-lg bg-muted/30 mb-3"
-                                onError={(e) => {
-                                  e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23f3f4f6" width="200" height="200"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%239ca3af" font-size="16"%3EResim Yok%3C/text%3E%3C/svg%3E';
-                                }}
-                              />
-                            ) : (
-                              <div className="w-full h-48 bg-muted/30 rounded-lg flex items-center justify-center mb-3">
-                                <Package className="w-12 h-12 text-muted-foreground/30" />
-                              </div>
-                            )}
-
-                            {/* Ürün Bilgileri */}
-                            <h3 className="font-semibold text-foreground mb-2 line-clamp-2">
-                              {displayName}
-                            </h3>
-                            
-                            <div className="space-y-1 text-sm text-muted-foreground mb-3">
-                              <p>Gramaj: {row.weightGrams} gr</p>
-                              {row.currentPrice && (
-                                <p className="text-xs">
-                                  Maliyet: {formatCurrency(row.costBreakdown.total)}
-                                </p>
-                              )}
-                            </div>
-
-                            {/* Fiyat */}
-                            {row.currentPrice !== null ? (
-                              <div className="pt-3 border-t border-border">
-                                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                                  {formatCurrency(row.currentPrice)}
-                                </p>
-                              </div>
-                            ) : (
-                              <div className="pt-3 border-t border-border">
-                                <p className="text-sm text-muted-foreground italic">
-                                  Fiyat belirlenmemiş
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <h3 className="text-lg font-bold text-foreground mb-1">Katalog Boş</h3>
+                    <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+                      Kataloga dahil etmek istediğiniz ürün kategorilerini yukarıdaki panelden seçebilirsiniz.
+                    </p>
                   </div>
-                ))}
+                ) : (
+                  Object.entries(groupedProducts)
+                    .filter(([category]) => selectedCategories.includes(category))
+                    .map(([category, categoryRows]) => (
+                      <div key={category} className="space-y-4">
+                        <div className="bg-muted/50 p-4 rounded-xl border-l-4 border-blue-500">
+                          <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
+                            <span>{getCategoryEmoji(category)}</span>
+                            <span>{category}</span>
+                            <span className="text-sm font-normal text-muted-foreground ml-2">
+                              ({categoryRows.length} ürün)
+                            </span>
+                          </h2>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                          {categoryRows.map((row) => {
+                            const key = row.sizeId || row.productId;
+                            const product = products.find(p => p.id === row.productId);
+                            const displayName = row.sizeName 
+                              ? `${row.productName} (${row.sizeName})`
+                              : row.productName;
+
+                            return (
+                              <div
+                                key={key}
+                                className="bg-card border border-border rounded-xl p-4 hover:shadow-lg transition-shadow"
+                              >
+                                {/* Ürün Resmi */}
+                                {product?.image_url ? (
+                                  <img
+                                    src={product.image_url}
+                                    alt={displayName}
+                                    className="w-full h-48 object-contain rounded-lg bg-muted/30 mb-3"
+                                    onError={(e) => {
+                                      e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23f3f4f6" width="200" height="200"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%239ca3af" font-size="16"%3EResim Yok%3C/text%3E%3C/svg%3E';
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="w-full h-48 bg-muted/30 rounded-lg flex items-center justify-center mb-3">
+                                    <Package className="w-12 h-12 text-muted-foreground/30" />
+                                  </div>
+                                )}
+
+                                {/* Ürün Bilgileri */}
+                                <h3 className="font-semibold text-foreground mb-2 line-clamp-2">
+                                  {displayName}
+                                </h3>
+                                
+                                <div className="space-y-1 text-sm text-muted-foreground mb-3">
+                                  <p>Gramaj: {row.weightGrams} gr</p>
+                                  {row.currentPrice && (
+                                    <p className="text-xs">
+                                      Maliyet: {formatCurrency(row.costBreakdown.total)}
+                                    </p>
+                                  )}
+                                </div>
+
+                                {row.currentPrice ? (
+                                  <div className="pt-3 border-t border-border">
+                                    <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                                      {formatCurrency(row.currentPrice)}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div className="pt-3 border-t border-border">
+                                    <p className="text-sm text-muted-foreground italic">
+                                      Fiyat belirlenmemiş
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))
+                )}
               </div>
             </div>
           </div>
@@ -991,6 +1155,9 @@ export function ProductPricesTab() {
                     Önerilen Fiyat
                     <Info className="w-3 h-3 text-muted-foreground/50" />
                   </div>
+                </th>
+                <th className="text-left p-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Trendyol Hedef Fiyatı
                 </th>
                 <th className="text-left p-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Mevcut Fiyat
@@ -1044,69 +1211,69 @@ export function ProductPricesTab() {
                         <div className="absolute left-0 top-full mt-2 w-80 bg-popover border border-border rounded-lg shadow-lg p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
                           <p className="text-xs font-semibold text-foreground mb-2">Maliyet Dökümü ({row.weightGrams} gr):</p>
                           <div className="space-y-2 text-xs">
-                            {costSettings && row.costBreakdown.filament > 0 && (
+                            {row.costBreakdown.filament > 0 && (
                               <div className="space-y-0.5">
                                 <div className="flex justify-between">
                                   <span className="text-muted-foreground">Filament:</span>
                                   <span className="text-foreground font-medium">{formatCurrency(row.costBreakdown.filament)}</span>
                                 </div>
                                 <div className="text-[10px] text-muted-foreground pl-2">
-                                  {row.weightGrams} gr × (1 + %{costSettings.waste_percentage}) × {formatCurrency(costSettings.filament_price_per_kg)}/kg
+                                  {row.weightGrams} gr × (1 + %{row.appliedCostSettings.waste_percentage}) × {formatCurrency(row.appliedCostSettings.filament_price_per_kg)}/kg
                                 </div>
                               </div>
                             )}
-                            {costSettings && row.costBreakdown.electricity > 0 && (
+                            {row.costBreakdown.electricity > 0 && (
                               <div className="space-y-0.5">
                                 <div className="flex justify-between">
                                   <span className="text-muted-foreground">Elektrik:</span>
                                   <span className="text-foreground font-medium">{formatCurrency(row.costBreakdown.electricity)}</span>
                                 </div>
                                 <div className="text-[10px] text-muted-foreground pl-2">
-                                  {(row.weightGrams * (1 + costSettings.waste_percentage / 100)).toFixed(1)} gr × {formatCurrency(costSettings.electricity_cost_per_gram)}/gr
+                                  {(row.weightGrams * (1 + row.appliedCostSettings.waste_percentage / 100)).toFixed(1)} gr × {formatCurrency(row.appliedCostSettings.electricity_cost_per_gram)}/gr
                                 </div>
                               </div>
                             )}
-                            {costSettings && row.costBreakdown.depreciation > 0 && (
+                            {row.costBreakdown.depreciation > 0 && (
                               <div className="space-y-0.5">
                                 <div className="flex justify-between">
                                   <span className="text-muted-foreground">Yıpranma:</span>
                                   <span className="text-foreground font-medium">{formatCurrency(row.costBreakdown.depreciation)}</span>
                                 </div>
                                 <div className="text-[10px] text-muted-foreground pl-2">
-                                  {(row.weightGrams * (1 + costSettings.waste_percentage / 100)).toFixed(1)} gr × {formatCurrency(costSettings.depreciation_cost_per_gram)}/gr
+                                  {(row.weightGrams * (1 + row.appliedCostSettings.waste_percentage / 100)).toFixed(1)} gr × {formatCurrency(row.appliedCostSettings.depreciation_cost_per_gram)}/gr
                                 </div>
                               </div>
                             )}
-                            {costSettings && row.costBreakdown.candleholder > 0 && (
+                            {row.costBreakdown.candleholder > 0 && (
                               <div className="space-y-0.5">
                                 <div className="flex justify-between">
-                                  <span className="text-muted-foreground">Mumluk Ücreti:</span>
+                                  <span className="text-muted-foreground">Pilli mum:</span>
                                   <span className="text-foreground font-medium">{formatCurrency(row.costBreakdown.candleholder)}</span>
                                 </div>
                                 <div className="text-[10px] text-muted-foreground pl-2">
-                                  1 adet × {formatCurrency(costSettings.candleholder_cost_per_unit)}/adet
+                                  1 adet × {formatCurrency(row.appliedCostSettings.candleholder_cost_per_unit)}/adet
                                 </div>
                               </div>
                             )}
-                            {costSettings && row.costBreakdown.keychain > 0 && (
+                            {row.costBreakdown.keychain > 0 && (
                               <div className="space-y-0.5">
                                 <div className="flex justify-between">
-                                  <span className="text-muted-foreground">Zincir Ücreti:</span>
+                                  <span className="text-muted-foreground">Anahtar zinciri:</span>
                                   <span className="text-foreground font-medium">{formatCurrency(row.costBreakdown.keychain)}</span>
                                 </div>
                                 <div className="text-[10px] text-muted-foreground pl-2">
-                                  1 adet × {formatCurrency(costSettings.keychain_cost_per_unit)}/adet
+                                  1 adet × {formatCurrency(row.appliedCostSettings.keychain_cost_per_unit)}/adet
                                 </div>
                               </div>
                             )}
-                            {costSettings && row.costBreakdown.soapdish > 0 && (
+                            {row.costBreakdown.soapdish > 0 && (
                               <div className="space-y-0.5">
                                 <div className="flex justify-between">
-                                  <span className="text-muted-foreground">Pompa Ücreti:</span>
+                                  <span className="text-muted-foreground">Sabunluk Pompası:</span>
                                   <span className="text-foreground font-medium">{formatCurrency(row.costBreakdown.soapdish)}</span>
                                 </div>
                                 <div className="text-[10px] text-muted-foreground pl-2">
-                                  1 adet × {formatCurrency(costSettings.soapdish_cost_per_unit)}/adet
+                                  1 adet × {formatCurrency(row.appliedCostSettings.soapdish_cost_per_unit)}/adet
                                 </div>
                               </div>
                             )}
@@ -1124,6 +1291,62 @@ export function ProductPricesTab() {
                             </div>
                           </div>
                         </div>
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="space-y-1">
+                              <span className="text-sm font-semibold text-violet-600 dark:text-violet-400 cursor-help">
+                              {formatCurrency(row.trendyolExactPrice)}
+                            </span>
+                            <div className="absolute left-0 top-full mt-2 w-80 bg-popover border border-border rounded-lg shadow-lg p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                              <p className="text-xs font-semibold text-foreground mb-2">Trendyol Hesaplama ({row.weightGrams} gr):</p>
+                              <div className="space-y-2 text-xs">
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">Üretim Maliyeti{getProductionCostLabel(row)}:</span>
+                                  <span className="text-foreground font-medium">{formatCurrency(row.costBreakdown.total)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">Kutulama:</span>
+                                  <span className="text-foreground font-medium">{formatCurrency(trendyolSettings.packagingCost)}</span>
+                                </div>
+                                {(() => {
+                                  const b = calcTrendyolBreakdownAtPrice(row.trendyolExactPrice, row.costBreakdown.total, row.weightGrams, trendyolSettings);
+                                  return (
+                                    <>
+                                      <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Kargo (KDV dahil):</span>
+                                        <span className="text-foreground font-medium">{formatCurrency(b.shipping)}</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Platform Hizmet Bedeli (KDV dahil):</span>
+                                        <span className="text-foreground font-medium">{formatCurrency(b.platformFee)}</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Sabit Gider:</span>
+                                        <span className="text-foreground font-medium">{formatCurrency(b.fixedCost)}</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-muted-foreground">İade Maliyeti (%{trendyolSettings.returnRate}):</span>
+                                        <span className="text-foreground font-medium">{formatCurrency(b.returnCost)}</span>
+                                      </div>
+                                      <div className="pt-2 border-t border-border">
+                                        <div className="flex justify-between">
+                                          <span className="text-foreground font-semibold">Toplam Giderler:</span>
+                                          <span className="text-foreground font-semibold">{formatCurrency(b.totalExpenses)}</span>
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-between text-green-600 dark:text-green-400 pt-1">
+                                        <span className="font-semibold">Net Kâr:</span>
+                                        <span className="font-semibold">{formatCurrency(b.netProfit)}</span>
+                                      </div>
+                                      <div className="text-[10px] text-muted-foreground">
+                                        <span>Kâr/Fiyat: %{b.netMarginOnPrice.toFixed(1)}</span>
+                                      </div>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
                       </div>
                     </td>
                     <td className="p-4">

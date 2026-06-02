@@ -29,6 +29,15 @@ export type Database = {
           is_spice_holder: boolean;
           is_towel_holder: boolean;
           is_brush_holder: boolean;
+          is_pot: boolean;
+          is_toy: boolean;
+          is_decor: boolean;
+          is_holder: boolean;
+          is_gpu_support: boolean;
+          is_bookmark: boolean;
+          is_pencil_holder: boolean;
+          is_plate_holder: boolean;
+          is_organizer: boolean;
           price: number | null;
           created_at: string;
         };
@@ -51,6 +60,15 @@ export type Database = {
           is_spice_holder?: boolean;
           is_towel_holder?: boolean;
           is_brush_holder?: boolean;
+          is_pot?: boolean;
+          is_toy?: boolean;
+          is_decor?: boolean;
+          is_holder?: boolean;
+          is_gpu_support?: boolean;
+          is_bookmark?: boolean;
+          is_pencil_holder?: boolean;
+          is_plate_holder?: boolean;
+          is_organizer?: boolean;
           price?: number | null;
           created_at?: string;
         };
@@ -73,6 +91,15 @@ export type Database = {
           is_spice_holder?: boolean;
           is_towel_holder?: boolean;
           is_brush_holder?: boolean;
+          is_pot?: boolean;
+          is_toy?: boolean;
+          is_decor?: boolean;
+          is_holder?: boolean;
+          is_gpu_support?: boolean;
+          is_bookmark?: boolean;
+          is_pencil_holder?: boolean;
+          is_plate_holder?: boolean;
+          is_organizer?: boolean;
           price?: number | null;
           created_at?: string;
         };
@@ -109,6 +136,38 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "product_sizes_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      product_images: {
+        Row: {
+          id: string;
+          product_id: string;
+          url: string;
+          sort_order: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          product_id: string;
+          url: string;
+          sort_order?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          product_id?: string;
+          url?: string;
+          sort_order?: number;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "product_images_product_id_fkey";
             columns: ["product_id"];
             isOneToOne: false;
             referencedRelation: "products";
@@ -640,6 +699,9 @@ export type Database = {
 // Kolay kullanım için tip kısayolları
 export type Product = Database["public"]["Tables"]["products"]["Row"];
 export type ProductInsert = Database["public"]["Tables"]["products"]["Insert"];
+
+export type ProductImage = Database["public"]["Tables"]["product_images"]["Row"];
+export type ProductImageInsert = Database["public"]["Tables"]["product_images"]["Insert"];
 
 export type ProductSize = Database["public"]["Tables"]["product_sizes"]["Row"];
 export type ProductSizeInsert = Database["public"]["Tables"]["product_sizes"]["Insert"];

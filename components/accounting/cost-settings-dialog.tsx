@@ -337,10 +337,10 @@ export function CostSettingsDialog({
               </div>
             </div>
 
-            {/* Mumluk Ücreti */}
+            {/* Pilli Mum Ücreti */}
             <div className="space-y-3 p-4 bg-muted/30 rounded-lg border border-border">
               <div className="flex items-center justify-between">
-                <Label className="text-base font-semibold">Mumluk Ücreti</Label>
+                <Label className="text-base font-semibold">Pilli mum Ücreti</Label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -353,7 +353,7 @@ export function CostSettingsDialog({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="candleholder-cost" className="text-sm text-muted-foreground">
-                  TL/adet (Mumluk özelliği olan ürünler için eklenen sabit maliyet)
+                  TL/adet (Pilli mum içeren ürünler için eklenen sabit maliyet)
                 </Label>
                 <Input
                   id="candleholder-cost"
@@ -368,10 +368,10 @@ export function CostSettingsDialog({
               </div>
             </div>
 
-            {/* Anahtarlık/Zincir Ücreti */}
+            {/* Anahtar Zinciri Ücreti */}
             <div className="space-y-3 p-4 bg-muted/30 rounded-lg border border-border">
               <div className="flex items-center justify-between">
-                <Label className="text-base font-semibold">Anahtarlık Zincir Ücreti</Label>
+                <Label className="text-base font-semibold">Anahtar zinciri Ücreti</Label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -384,7 +384,7 @@ export function CostSettingsDialog({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="keychain-cost" className="text-sm text-muted-foreground">
-                  TL/adet (Anahtarlık özelliği olan ürünler için eklenen zincir maliyeti)
+                  TL/adet (Anahtar zinciri içeren ürünler için eklenen maliyet)
                 </Label>
                 <Input
                   id="keychain-cost"
