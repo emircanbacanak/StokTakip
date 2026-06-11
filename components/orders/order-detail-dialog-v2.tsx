@@ -369,34 +369,58 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
   const loadDetails = useCallback(async () => {
     const sb = createClient();
     try {
+      // Deliveries — join yerine ayrı sorgular
       const { data: deliveriesData, error: deliveriesError } = await sb
-        .from("deliveries").select(`*, items:delivery_items(*, order_item:order_items(*))`)
-        .eq("order_id", order.id).order("delivery_date", { ascending: false });
-      
-      const { data: paymentsData, error: paymentsError } = await sb
-        .from("payments").select("*").eq("order_id", order.id).order("payment_date", { ascending: false});
-      const { data: orderData } = await sb
-        .from("orders").select("*, buyer:buyers(*), items:order_items(*)").eq("id", order.id).single();
-      if (orderData) {
-        // Debug: Her ürünü kontrol et
-        let debugTotal = 0;
-        (orderData as any).items.forEach((item: any) => {
-          const produced = item.produced_quantity || 0;
-          const delivered = item.delivered_quantity || 0;
-          const remaining = produced - delivered;
-          if (remaining > 0) {
-            debugTotal += remaining;
-          }
-          // Sadece sorunlu ürünleri logla
-          if (remaining < 0 || produced === null || delivered === null) {
-            console.log('⚠️ Sorunlu ürün:', item.product_name, item.color, 'P:', produced, 'D:', delivered, 'R:', remaining);
-          }
+        .from("deliveries")
+        .select("*")
+        .eq("order_id", order.id)
+        .order("delivery_date", { ascending: false });
+
+      let deliveriesWithItems: any[] = [];
+      if (deliveriesData && deliveriesData.length > 0) {
+        const deliveryIds = (deliveriesData as any[]).map(d => d.id);
+        const { data: deliveryItemsData } = await sb
+          .from("delivery_items")
+          .select("*")
+          .in("delivery_id", deliveryIds);
+
+        const orderItemIds = [...new Set((deliveryItemsData || []).map((di: any) => di.order_item_id))];
+        let orderItemsMap: Record<string, any> = {};
+        if (orderItemIds.length > 0) {
+          const { data: orderItemsData } = await sb
+            .from("order_items")
+            .select("*")
+            .in("id", orderItemIds as string[]);
+          (orderItemsData || []).forEach((oi: any) => { orderItemsMap[oi.id] = oi; });
+        }
+
+        const diByDelivery: Record<string, any[]> = {};
+        (deliveryItemsData || []).forEach((di: any) => {
+          if (!diByDelivery[di.delivery_id]) diByDelivery[di.delivery_id] = [];
+          diByDelivery[di.delivery_id].push({ ...di, order_item: orderItemsMap[di.order_item_id] || null });
         });
-        
-        console.log('📦 Order items loaded:', (orderData as any).items.length, 'items, Total produced:', debugTotal);
-        setOrder(orderData as any);
+
+        deliveriesWithItems = (deliveriesData as any[]).map(d => ({
+          ...d,
+          items: diByDelivery[d.id] || [],
+        }));
       }
-      setDeliveries((deliveriesData as any) || []);
+
+      const { data: paymentsData, error: paymentsError } = await sb
+        .from("payments").select("*").eq("order_id", order.id).order("payment_date", { ascending: false });
+
+      // Order detayları — join yerine ayrı sorgular
+      const { data: orderBase } = await sb.from("orders").select("*").eq("id", order.id).single();
+      const { data: buyerData } = orderBase
+        ? await sb.from("buyers").select("*").eq("id", (orderBase as any).buyer_id).single()
+        : { data: null };
+      const { data: orderItemsData } = await sb.from("order_items").select("*").eq("order_id", order.id);
+
+      if (orderBase) {
+        setOrder({ ...orderBase, buyer: buyerData || {}, items: orderItemsData || [] } as any);
+      }
+
+      setDeliveries(deliveriesWithItems as any || []);
       setPayments(paymentsData || []);
       if (deliveriesError || paymentsError) { setTablesNotFound(true); }
     } catch { setDeliveries([]); setPayments([]); } finally { setLoading(false); }

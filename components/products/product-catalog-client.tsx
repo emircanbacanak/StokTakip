@@ -495,7 +495,7 @@ function ProductForm({ initial, onSave, onCancel }: ProductFormProps) {
 
     const productData = {
       name: name.trim(),
-      description: description.trim() || null,
+      description: description.trim() || "",  // NOT NULL constraint için boş string fallback
       image_url: imageUrl,
       weight_grams: hasSizes ? 0 : finalWeight,
       has_sizes: hasSizes,

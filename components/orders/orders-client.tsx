@@ -104,11 +104,56 @@ export function OrdersClient() {
 
   const load = useCallback(async () => {
     let sb; try { sb = createClient(); } catch { setLoading(false); return; }
-    const { data } = await sb
+
+    // Önce siparişleri çek
+    const { data: ordersData, error: ordersError } = await sb
       .from("orders")
-      .select("id, created_at, total_amount, paid_amount, status, notes, buyer:buyers(id,name), items:order_items(id,product_name,color,quantity,produced_quantity,delivered_quantity,unit_price,size_name,includes_candle)")
+      .select("id, created_at, total_amount, paid_amount, status, notes, buyer_id")
       .order("created_at", { ascending: false });
-    const list = (data as unknown as Order[]) || [];
+
+    if (ordersError) {
+      console.error("Siparişler yüklenemedi:", JSON.stringify(ordersError), ordersError.code, ordersError.message);
+      toast({ title: "Yükleme hatası", description: ordersError.message || ordersError.code || "Bilinmeyen hata", variant: "destructive" });
+      setLoading(false);
+      return;
+    }
+
+    if (!ordersData || ordersData.length === 0) {
+      setOrders([]);
+      setLoading(false);
+      return;
+    }
+
+    const orderIds = ordersData.map((o: any) => o.id);
+    const buyerIds = [...new Set(ordersData.map((o: any) => o.buyer_id))];
+
+    // Alıcıları çek
+    const { data: buyersData } = await sb
+      .from("buyers")
+      .select("id, name")
+      .in("id", buyerIds as string[]);
+
+    // Sipariş kalemlerini çek
+    const { data: itemsData } = await sb
+      .from("order_items")
+      .select("id, order_id, product_name, color, quantity, produced_quantity, delivered_quantity, unit_price, size_name, includes_candle")
+      .in("order_id", orderIds);
+
+    const buyerMap: Record<string, { id: string; name: string }> = {};
+    (buyersData || []).forEach((b: any) => { buyerMap[b.id] = b; });
+
+    const itemsMap: Record<string, any[]> = {};
+    (itemsData || []).forEach((item: any) => {
+      if (!itemsMap[item.order_id]) itemsMap[item.order_id] = [];
+      itemsMap[item.order_id].push(item);
+    });
+
+    const list: Order[] = (ordersData as any[]).map((o: any) => ({
+      ...o,
+      buyer: buyerMap[o.buyer_id] || { id: o.buyer_id, name: "Bilinmiyor" },
+      items: itemsMap[o.id] || [],
+    }));
+
     setOrders(list);
     setLoading(false);
   }, []);

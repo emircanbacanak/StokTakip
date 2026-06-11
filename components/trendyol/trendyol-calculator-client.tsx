@@ -13,6 +13,7 @@ interface TrendyolProduct {
   productName: string;
   weightGrams: number;
   quantity: number;
+  // Ekstra malzeme flag'leri — kullanıcı toggle edebilir
   isCandleholder?: boolean;
   isKeychain?: boolean;
   isSoapdish?: boolean;
@@ -27,10 +28,12 @@ interface TrendyolSettings {
   wastePercentage: number;
 
   // Trendyol Maliyetleri
-  commissionRate: number;       // % — fiyattan kesilir
-  paymentTermFee: number;       // % — fiyattan kesilir (vade farkı)
-  packagingCost: number;        // TL/sipariş
-  platformFeeBase: number;      // TL — platform hizmet bedeli (KDV hariç)
+  commissionRate: number;
+  paymentTermFee: number;
+  packagingCost: number;
+  platformFeeBase: number;      // TL — "Bugün Kargoda" etiketi YOK → 10.99 TL
+  platformFeeExpress: number;   // TL — "Bugün Kargoda" etiketi VAR → 4.99 TL
+  useExpressPlatformFee: boolean; // true = Bugün Kargoda aktif
 
   // Kargo
   fastShipping: boolean;        // true = Tablo 1 (hızlı), false = Tablo 2 (yavaş)
@@ -60,6 +63,8 @@ const DEFAULT_TRENDYOL_SETTINGS: TrendyolSettings = {
   paymentTermFee: 3,
   packagingCost: 15,
   platformFeeBase: 10.99,
+  platformFeeExpress: 4.99,
+  useExpressPlatformFee: false,
 
   fastShipping: true,
 
@@ -145,6 +150,11 @@ function calcShipping(weightGrams: number, price: number, fastShipping: boolean)
   return calcShippingCost(weightGrams, price, fastShipping);
 }
 
+function getActivePlatformFee(s: TrendyolSettings): number {
+  const base = s.useExpressPlatformFee ? s.platformFeeExpress : s.platformFeeBase;
+  return base * 1.20; // KDV dahil
+}
+
 function calcProductionCost(weightGrams: number, s: TrendyolSettings): number {
   const w = weightGrams * (1 + s.wastePercentage / 100);
   return (w / 1000) * s.filamentPricePerKg
@@ -160,98 +170,90 @@ function calcProductionCost(weightGrams: number, s: TrendyolSettings): number {
  *   P × (1 − totalCutRate − m) = baseCost
  *   P = baseCost / (1 − totalCutRate − m)
  */
-function calcTrendyolPrice(productionCost: number, weightGrams: number, s: TrendyolSettings): PricingResult {
-  const platformFee = s.platformFeeBase * 1.20;
+function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number, s: TrendyolSettings, quantity: number = 1): PricingResult {
+  const platformFee = getActivePlatformFee(s);
   const packagingCost = s.packagingCost;
   const fixedCost = s.fixedCostPerOrder;
   const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
-  const vatDivisor = 1 + 0.20;
 
-  const cutRateOnGross = (s.commissionRate + s.paymentTermFee) / 100; // brüt fiyat üzerinden
+  const cutRateOnGross = (s.commissionRate + s.paymentTermFee) / 100;
   const totalCutRate = cutRateOnGross + adRate;
-  const m = s.profitMargin / 100; // fiyat üzerinden hedef kâr oranı
+  const m = s.profitMargin / 100;
   const denominator = 1 - totalCutRate - m;
 
-  const desi = gramsToDesi(weightGrams);
+  const desi = gramsToDesi(weightGramsTotal);
 
-  // ── Barem altı çözüm (desi < 10 ise): Kargo sabittir, ₺199 tavanında ──
+  // Fiyat P = setin satış fiyatı (müşteri bu fiyatı öder)
+  // Gelir = P (tek sipariş)
+  // Giderler: üretim(toplam) + kargo(1x) + paket(1x) + platform(1x) + sabit(1x) + iade + komisyon(P üzerinden)
+  // Net kâr hedefi: P × m
+  // P × (1 - cutRate - m) = sabit_giderler  →  P = sabit_giderler / denominator
+
+  function calcFixedCost(shippingPrice: number): number {
+    const sh = calcShipping(weightGramsTotal, shippingPrice, s.fastShipping);
+    const rc = (productionCostTotal + sh + packagingCost) * (s.returnRate / 100);
+    return productionCostTotal + sh + packagingCost + platformFee + fixedCost + rc;
+  }
+
+  // ── Barem altı ──
   let priceUnder200 = Infinity;
   if (desi < 10) {
-    const sh = calcShipping(weightGrams, 199, s.fastShipping); // barem altı kargo ücreti sabittir
-    const rc = (productionCost + sh + packagingCost) * (s.returnRate / 100);
-    const bc = productionCost + sh + packagingCost + platformFee + fixedCost + rc;
-    const p = bc / denominator;
+    const fg = calcFixedCost(199);
+    const p = fg / denominator;
     if (p <= 199) priceUnder200 = p;
   }
 
-  // ── Barem üstü çözüm: 200 TL'den başla ──────────────────────────────────
+  // ── Barem üstü ──
   let priceOver200 = 200;
   for (let i = 0; i < 20; i++) {
-    const sh = calcShipping(weightGrams, priceOver200, s.fastShipping);
-    const rc = (productionCost + sh + packagingCost) * (s.returnRate / 100);
-    const bc = productionCost + sh + packagingCost + platformFee + fixedCost + rc;
-    const np = bc / denominator;
+    const fg = calcFixedCost(priceOver200);
+    const np = fg / denominator;
     if (Math.abs(np - priceOver200) < 0.5) { priceOver200 = np; break; }
     priceOver200 = np;
   }
 
-  // ── En düşük fiyatı seç (hedef kârı daha az fiyatla veren) ──────────────
   const price = priceUnder200 <= priceOver200 ? priceUnder200 : priceOver200;
 
   // Başabaş
   let bePrice = 150;
   for (let i = 0; i < 20; i++) {
-    const beShipping = calcShipping(weightGrams, bePrice, s.fastShipping);
-    const beReturnCost = (productionCost + beShipping + packagingCost) * (s.returnRate / 100);
-    const beCost = productionCost + beShipping + packagingCost + platformFee + fixedCost + beReturnCost;
-    const newBe = beCost / (1 - totalCutRate);
-    if (Math.abs(newBe - bePrice) < 0.5) { bePrice = newBe; break; }
-    bePrice = newBe;
+    const fg = calcFixedCost(bePrice);
+    const np = fg / (1 - totalCutRate);
+    if (Math.abs(np - bePrice) < 0.5) { bePrice = np; break; }
+    bePrice = np;
   }
 
-  // Yuvarlanmış fiyat — hedef marjı tam sağlayana dek ₺5 adımla ilerlet
+  // Yuvarlanmış fiyat
   let roundedPrice = Math.ceil(price / 5) * 5;
-  // Yuvarlamadan sonra kargo bandı değişmiş olabilir; gerçek kârı kontrol et
   for (let i = 0; i < 40; i++) {
-    const rShippingCheck = calcShipping(weightGrams, roundedPrice, s.fastShipping);
-    const rReturnCheck = (productionCost + rShippingCheck + packagingCost) * (s.returnRate / 100);
-    const rBaseCheck = productionCost + rShippingCheck + packagingCost + platformFee + fixedCost + rReturnCheck;
-    const rTotalExp = rBaseCheck + roundedPrice * (s.commissionRate / 100) + roundedPrice * (s.paymentTermFee / 100) + roundedPrice * adRate;
-    const rMargin = (roundedPrice - rTotalExp) / roundedPrice;
-    if (rMargin >= m - 0.001) break; // hedef marja ulaştık (küçük tolerans)
+    const fg = calcFixedCost(roundedPrice);
+    const totalExp = fg + roundedPrice * (s.commissionRate / 100) + roundedPrice * (s.paymentTermFee / 100) + roundedPrice * adRate;
+    const rMargin = roundedPrice > 0 ? (roundedPrice - totalExp) / roundedPrice : 0;
+    if (rMargin >= m - 0.001) break;
     roundedPrice += 5;
   }
 
-  // ── Barem optimizasyonu: ₺199 hedef marjı sağlıyorsa ve hala uygun ise onu seç ──────────────────────
-  const targetPrice = roundedPrice; // hedef kâr marjı fiyatı (barem öncesi)
+  // ── Barem optimizasyonu ──
+  const targetPrice = roundedPrice;
   if (desi < 10 && roundedPrice > 199) {
-    const s199 = calcShipping(weightGrams, 199, s.fastShipping);
-    const ret199 = (productionCost + s199 + packagingCost) * (s.returnRate / 100);
-    const base199 = productionCost + s199 + packagingCost + platformFee + fixedCost + ret199;
-    const exp199 = base199 + 199 * (s.commissionRate / 100) + 199 * (s.paymentTermFee / 100) + 199 * adRate;
+    const fg199 = calcFixedCost(199);
+    const exp199 = fg199 + 199 * (s.commissionRate / 100) + 199 * (s.paymentTermFee / 100) + 199 * adRate;
     const profit199 = 199 - exp199;
     const margin199 = 199 > 0 ? profit199 / 199 : 0;
 
     if (margin199 >= m) {
       roundedPrice = 199;
     } else {
-      const sR = calcShipping(weightGrams, roundedPrice, s.fastShipping);
-      const retR = (productionCost + sR + packagingCost) * (s.returnRate / 100);
-      const baseR = productionCost + sR + packagingCost + platformFee + fixedCost + retR;
-      const expR = baseR + roundedPrice * (s.commissionRate / 100) + roundedPrice * (s.paymentTermFee / 100) + roundedPrice * adRate;
-      const profitR = roundedPrice - expR;
-
-      if (profit199 > profitR) {
-        roundedPrice = 199;
-      }
+      const fgR = calcFixedCost(roundedPrice);
+      const expR = fgR + roundedPrice * (s.commissionRate / 100) + roundedPrice * (s.paymentTermFee / 100) + roundedPrice * adRate;
+      if (profit199 > roundedPrice - expR) roundedPrice = 199;
     }
   }
-  // ──────────────────────────────────────────────────────────────────────────
 
-  const rShipping = calcShipping(weightGrams, roundedPrice, s.fastShipping);
-  const rReturnCost = (productionCost + rShipping + packagingCost) * (s.returnRate / 100);
-  const rBaseCost = productionCost + rShipping + packagingCost + platformFee + fixedCost + rReturnCost;
-  // Komisyon ve vade: brüt satış fiyatı üzerinden (Trendyol KDV dahil fiyattan keser)
+  // Breakdown — tümü P (set fiyatı) üzerinden
+  const rShipping = calcShipping(weightGramsTotal, roundedPrice, s.fastShipping);
+  const rReturnCost = (productionCostTotal + rShipping + packagingCost) * (s.returnRate / 100);
+  const rBaseCost = productionCostTotal + rShipping + packagingCost + platformFee + fixedCost + rReturnCost;
   const rCommission = roundedPrice * (s.commissionRate / 100);
   const rPaymentTermFee = roundedPrice * (s.paymentTermFee / 100);
   const rAdvertisingCost = roundedPrice * adRate;
@@ -264,7 +266,7 @@ function calcTrendyolPrice(productionCost: number, weightGrams: number, s: Trend
     exactTargetPrice: price,
     breakEvenPrice: Math.ceil(bePrice / 5) * 5,
     breakdown: {
-      productionCost,
+      productionCost: productionCostTotal,
       packagingCost,
       shippingCost: rShipping,
       platformFee,
@@ -274,7 +276,7 @@ function calcTrendyolPrice(productionCost: number, weightGrams: number, s: Trend
       commission: rCommission,
       paymentTermFee: rPaymentTermFee,
       totalExpenses: rTotalExpenses,
-      netProfit: rNetProfit,
+      netProfit: rNetProfit,                   // sipariş bazı toplam kâr
       netMarginOnCost: rBaseCost > 0 ? (rNetProfit / rBaseCost) * 100 : 0,
       netMarginOnPrice: roundedPrice > 0 ? (rNetProfit / roundedPrice) * 100 : 0,
     },
@@ -316,17 +318,17 @@ interface BaremScenario {
  * Verilen sabit fiyat noktasında kârı hesaplar (fiyat dışarıdan verilir).
  * Barem optimizasyonu için kullanılır.
  */
-function calcAtFixedPrice(price: number, productionCost: number, weightGrams: number, s: TrendyolSettings): {
+function calcAtFixedPrice(price: number, productionCostTotal: number, weightGramsTotal: number, s: TrendyolSettings): {
   shipping: number; netProfit: number; netMarginOnPrice: number; totalExpenses: number;
 } {
-  const platformFee = s.platformFeeBase * 1.20;
+  const platformFee = getActivePlatformFee(s);
   const packagingCost = s.packagingCost;
   const fixedCost = s.fixedCostPerOrder;
   const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
-  const shipping = calcShipping(weightGrams, price, s.fastShipping); // KDV dahil
-  const returnCost = (productionCost + shipping + packagingCost) * (s.returnRate / 100);
-  const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
-  const commission = price * (s.commissionRate / 100);   // brüt fiyat üzerinden
+  const shipping = calcShipping(weightGramsTotal, price, s.fastShipping);
+  const returnCost = (productionCostTotal + shipping + packagingCost) * (s.returnRate / 100);
+  const baseCost = productionCostTotal + shipping + packagingCost + platformFee + fixedCost + returnCost;
+  const commission = price * (s.commissionRate / 100);
   const paymentTermFee = price * (s.paymentTermFee / 100);
   const advertisingCost = price * adRate;
   const totalExpenses = baseCost + commission + paymentTermFee + advertisingCost;
@@ -350,7 +352,7 @@ function calcBaremOptimization(productionCost: number, weightGrams: number, s: T
 
   const calcExactPrice = (shippingPrice: number) => {
     const shipping = calcShipping(weightGrams, shippingPrice, s.fastShipping);
-    const platformFee = s.platformFeeBase * 1.20;
+    const platformFee = getActivePlatformFee(s);
     const packagingCost = s.packagingCost;
     const fixedCost = s.fixedCostPerOrder;
     const returnCost = (productionCost + shipping + packagingCost) * (s.returnRate / 100);
@@ -406,6 +408,7 @@ export function TrendyolCalculatorClient() {
   const [products, setProducts] = useState<TrendyolProduct[]>([]);
   const [catalogSuggestions, setCatalogSuggestions] = useState<Product[]>([]);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [pendingFlags, setPendingFlags] = useState<{ isCandleholder: boolean; isKeychain: boolean; isSoapdish: boolean }>({ isCandleholder: false, isKeychain: false, isSoapdish: false });
   const suggRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -460,10 +463,15 @@ export function TrendyolCalculatorClient() {
   }, [productName]);
 
   function pickSuggestion(p: Product) {
-    // common weight fields fallback
     const w = (p as any).weight_grams ?? (p as any).weightGrams ?? (p as any).weight ?? (p as any).gramaj ?? (p as any).default_weight_grams ?? 0;
     setProductName((p as any).name ?? (p as any).product_name ?? "");
     setWeightGrams(w ? String(w) : "");
+    // Supabase'den gelen flag'leri pending state'e aktar — addProduct'ta kullanılacak
+    setPendingFlags({
+      isCandleholder: Boolean((p as any).is_candleholder),
+      isKeychain: Boolean((p as any).is_keychain),
+      isSoapdish: Boolean((p as any).is_soapdish),
+    });
     setSuggestionsOpen(false);
   }
 
@@ -503,7 +511,13 @@ export function TrendyolCalculatorClient() {
       toast({ title: "Hata", description: "Ürün adı ve gramaj girin", variant: "destructive" });
       return;
     }
-    const typeFlags = detectProductTypeFlags(productName.trim());
+    // Ad üzerinden algıla + Supabase'den gelen flag'leri birleştir (OR mantığı)
+    const fromName = detectProductTypeFlags(productName.trim());
+    const typeFlags = {
+      isCandleholder: pendingFlags.isCandleholder || fromName.isCandleholder,
+      isKeychain: pendingFlags.isKeychain || fromName.isKeychain,
+      isSoapdish: pendingFlags.isSoapdish || fromName.isSoapdish,
+    };
     setProducts(prev => [...prev, {
       id: Date.now().toString(),
       productName: productName.trim(),
@@ -512,6 +526,7 @@ export function TrendyolCalculatorClient() {
       ...typeFlags,
     }]);
     setProductName(""); setWeightGrams(""); setQuantity("1");
+    setPendingFlags({ isCandleholder: false, isKeychain: false, isSoapdish: false });
   };
 
   const costSettingsForCalc = {
@@ -530,16 +545,23 @@ export function TrendyolCalculatorClient() {
 
   const totals = products.reduce((acc, p) => {
     const { isCandleholder, isKeychain, isSoapdish } = getProductTypeFlags(p);
-    const costCalc = calculateProductCost(p.weightGrams, costSettingsForCalc, isCandleholder, isKeychain, isSoapdish);
-    const pc = costCalc.totalCost;
-    const pr = calcTrendyolPrice(pc, p.weightGrams, settings);
+    const qty = p.quantity;
+    const extraPerUnit =
+      (isCandleholder ? (costSettingsForCalc.candleholder_cost_per_unit ?? 0) : 0) +
+      (isKeychain ? (costSettingsForCalc.keychain_cost_per_unit ?? 0) : 0) +
+      (isSoapdish ? (costSettingsForCalc.soapdish_cost_per_unit ?? 0) : 0);
+    const pc = qty > 1
+      ? calculateProductCost(p.weightGrams * qty, costSettingsForCalc, false, false, false).totalCost + extraPerUnit * qty
+      : calculateProductCost(p.weightGrams, costSettingsForCalc, isCandleholder, isKeychain, isSoapdish).totalCost;
+    const pr = calcTrendyolPrice(pc, p.weightGrams * qty, settings, qty);
     return {
-      qty: acc.qty + p.quantity,
-      productionCost: acc.productionCost + pc * p.quantity,
-      revenue: acc.revenue + pr.recommendedPrice * p.quantity,
-      netProfit: acc.netProfit + pr.breakdown.netProfit * p.quantity,
+      qty: acc.qty + 1,
+      setCount: acc.setCount + qty,
+      productionCost: acc.productionCost + pr.breakdown.productionCost,
+      revenue: acc.revenue + pr.recommendedPrice,
+      netProfit: acc.netProfit + pr.breakdown.netProfit,
     };
-  }, { qty: 0, productionCost: 0, revenue: 0, netProfit: 0 });
+  }, { qty: 0, setCount: 0, productionCost: 0, revenue: 0, netProfit: 0 });
 
   // Ayar inputu yardımcısı
   const numInput = (
@@ -615,17 +637,35 @@ export function TrendyolCalculatorClient() {
                       onKeyDown={e => e.key === "Enter" && addProduct()} />
                   </div>
                   <div>
-                    <Label htmlFor="quantity">Adet</Label>
+                    <Label htmlFor="quantity">Set İçi Adet</Label>
                     <Input id="quantity" type="number" value={quantity} min="1"
                       onChange={e => setQuantity(e.target.value)}
                       onKeyDown={e => e.key === "Enter" && addProduct()} />
                   </div>
                 </div>
                 
+                {/* Ekstra Malzeme Toggle'ları */}
+                <div className="flex flex-wrap gap-3 p-2 bg-muted/40 rounded-lg">
+                  <p className="text-xs text-muted-foreground w-full mb-1">Ekstra malzeme (maliyet ayarlardan alınır):</p>
+                  {[
+                    { key: "isCandleholder" as const, label: "🕯️ Pilli Mum", cost: settings.candleholderCostPerUnit },
+                    { key: "isKeychain" as const, label: "🔑 Anahtarlık", cost: settings.keychainCostPerUnit },
+                    { key: "isSoapdish" as const, label: "🧴 Sabunluk Pompası", cost: settings.soapdishCostPerUnit },
+                  ].map(({ key, label, cost }) => (
+                    <label key={key} className={`flex items-center gap-1.5 cursor-pointer text-xs px-2 py-1 rounded border transition-colors
+                      ${pendingFlags[key] ? "bg-orange-100 border-orange-400 dark:bg-orange-950/40 dark:border-orange-600" : "bg-background border-border"}`}>
+                      <input type="checkbox" checked={pendingFlags[key]}
+                        onChange={e => setPendingFlags(f => ({ ...f, [key]: e.target.checked }))}
+                        className="w-3 h-3" />
+                      {label}
+                      {cost > 0 && <span className="text-muted-foreground">(+₺{cost})</span>}
+                    </label>
+                  ))}
+                </div>
+
                 <Button onClick={addProduct} className="w-full">
                   <Package className="w-4 h-4 mr-2" />Ürün Ekle
-                </Button>
-              </CardContent>
+                </Button>              </CardContent>
             </Card>
 
             {/* Ürün Listesi */}
@@ -638,9 +678,24 @@ export function TrendyolCalculatorClient() {
                   <div className="space-y-4">
                     {products.map(product => {
                       const { isCandleholder, isKeychain, isSoapdish } = getProductTypeFlags(product);
-                      const costCalc = calculateProductCost(product.weightGrams, costSettingsForCalc, isCandleholder, isKeychain, isSoapdish);
-                      const pc = costCalc.totalCost;
-                      const pr = calcTrendyolPrice(pc, product.weightGrams, settings);
+                      const qty = product.quantity;
+
+                      // Set üretim maliyeti: filament/elektrik toplam gramaj üzerinden,
+                      // ekstra malzemeler (mum, anahtarlık, pompa) qty kadar
+                      const costCalcUnit = calculateProductCost(product.weightGrams, costSettingsForCalc, isCandleholder, isKeychain, isSoapdish);
+                      const costCalcTotal = qty > 1
+                        ? calculateProductCost(product.weightGrams * qty, costSettingsForCalc, false, false, false)
+                        : costCalcUnit;
+                      // Ekstra malzeme maliyeti qty ile çarp
+                      const extraPerUnit =
+                        (isCandleholder ? (costSettingsForCalc.candleholder_cost_per_unit ?? 0) : 0) +
+                        (isKeychain ? (costSettingsForCalc.keychain_cost_per_unit ?? 0) : 0) +
+                        (isSoapdish ? (costSettingsForCalc.soapdish_cost_per_unit ?? 0) : 0);
+                      const pc = qty > 1
+                        ? costCalcTotal.totalCost + extraPerUnit * qty
+                        : costCalcUnit.totalCost;
+
+                      const pr = calcTrendyolPrice(pc, product.weightGrams * qty, settings, qty);
                       const bd = pr.breakdown;
                       const cargoRatio = (bd.shippingCost / pr.recommendedPrice) * 100;
 
@@ -650,7 +705,7 @@ export function TrendyolCalculatorClient() {
                         productionCost: pc,
                         weightGrams: product.weightGrams,
                         packagingCost: settings.packagingCost,
-                        platformFee: settings.platformFeeBase * 1.20,
+                        platformFee: (settings.useExpressPlatformFee ? settings.platformFeeExpress : settings.platformFeeBase) * 1.20,
                         fixedCost: settings.fixedCostPerOrder,
                         returnRate: settings.returnRate,
                         commissionRate: settings.commissionRate,
@@ -666,10 +721,39 @@ export function TrendyolCalculatorClient() {
                           <div className="flex items-start justify-between">
                             <div>
                               <h3 className="font-semibold">{product.productName}</h3>
-                              <p className="text-sm text-muted-foreground">{product.weightGrams} gr × {product.quantity} adet</p>
+                              <p className="text-sm text-muted-foreground">
+                                {product.quantity > 1
+                                  ? `${product.weightGrams} gr × ${product.quantity} adet = ${product.weightGrams * product.quantity} gr (${product.quantity}'li set)`
+                                  : `${product.weightGrams} gr`}
+                              </p>
                             </div>
                             <Button variant="ghost" size="sm" onClick={() => removeProduct(product.id)}
                               className="text-red-600 hover:text-red-700 hover:bg-red-50">Sil</Button>
+                          </div>
+
+                          {/* Ekstra Malzeme Toggle'ları — listede de değiştirilebilir */}
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              { key: "isCandleholder" as const, label: "🕯️ Pilli Mum", cost: settings.candleholderCostPerUnit },
+                              { key: "isKeychain" as const, label: "🔑 Anahtarlık", cost: settings.keychainCostPerUnit },
+                              { key: "isSoapdish" as const, label: "🧴 Pompa", cost: settings.soapdishCostPerUnit },
+                            ].map(({ key, label, cost }) => {
+                              const active = Boolean(product[key]);
+                              return (
+                                <button key={key} type="button"
+                                  onClick={() => setProducts(prev => prev.map(p =>
+                                    p.id === product.id ? { ...p, [key]: !active } : p
+                                  ))}
+                                  className={`text-xs px-2 py-1 rounded border transition-colors flex items-center gap-1
+                                    ${active
+                                      ? "bg-orange-100 border-orange-400 text-orange-800 dark:bg-orange-950/40 dark:border-orange-600 dark:text-orange-200"
+                                      : "bg-muted/30 border-border text-muted-foreground"}`}>
+                                  {label}
+                                  {active && cost > 0 && <span className="font-semibold">+₺{cost}</span>}
+                                  {!active && <span className="opacity-50">+₺{cost}</span>}
+                                </button>
+                              );
+                            })}
                           </div>
 
                           {/* Ana Fiyat Kartları */}
@@ -680,16 +764,45 @@ export function TrendyolCalculatorClient() {
                               <p className="text-xs text-red-500">altı zarar</p>
                             </div>
                             <div className="rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 p-2 text-center">
-                              <p className="text-xs text-orange-600 font-semibold">Üretim Maliyeti</p>
+                              <p className="text-xs text-orange-600 font-semibold">
+                                {qty > 1 ? `Set Üretim (${qty}×)` : "Üretim Maliyeti"}
+                              </p>
                               <p className="font-bold text-orange-700 dark:text-orange-300 text-base">₺{pc.toFixed(2)}</p>
-                              <p className="text-xs text-muted-foreground">kargo hariç</p>
+                              <p className="text-xs text-muted-foreground">
+                                {qty > 1
+                                  ? `${qty} × ₺${(pc / qty).toFixed(2)}`
+                                  : [isCandleholder && "🕯️", isKeychain && "🔑", isSoapdish && "🧴"].filter(Boolean).join(" ") || "kargo hariç"}
+                              </p>
                             </div>
                             <div className="rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 p-2 text-center">
-                              <p className="text-xs text-green-600 font-semibold">Önerilen Fiyat</p>
+                              <p className="text-xs text-green-600 font-semibold">
+                                {product.quantity > 1 ? `${product.quantity}'li Set Fiyatı` : "Önerilen Fiyat"}
+                              </p>
                               <p className="font-bold text-green-700 dark:text-green-300 text-lg">₺{pr.recommendedPrice}</p>
                               <p className="text-xs text-green-500">%{settings.profitMargin} net kâr (fiyattan)</p>
                             </div>
                           </div>
+
+                          {/* Set içi adet > 1 ise özet */}
+                          {product.quantity > 1 && (
+                            <div className="grid grid-cols-3 gap-2 text-xs bg-slate-50 dark:bg-slate-900/30 rounded-lg p-2 border border-slate-200 dark:border-slate-700">
+                              <div className="text-center">
+                                <p className="text-muted-foreground">Set Üretim Maliyeti</p>
+                                <p className="font-bold text-orange-700 dark:text-orange-300">₺{bd.productionCost.toFixed(2)}</p>
+                                <p className="text-muted-foreground">{product.quantity} × ₺{pc.toFixed(2)}</p>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-muted-foreground">Set Satış Fiyatı</p>
+                                <p className="font-bold text-blue-700 dark:text-blue-300">₺{pr.recommendedPrice}</p>
+                                <p className="text-muted-foreground">tek sipariş</p>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-muted-foreground">Set Kârı</p>
+                                <p className="font-bold text-emerald-700 dark:text-emerald-300">₺{bd.netProfit.toFixed(2)}</p>
+                                <p className="text-muted-foreground">tek sipariş</p>
+                              </div>
+                            </div>
+                          )}
 
                           {/* Kâr Uyarısı */}
                           {bd.netProfit < 15 && (
@@ -750,7 +863,7 @@ export function TrendyolCalculatorClient() {
                             // targetPrice = hedef kâr marjına göre hesaplanan fiyat (barem öncesi)
                             // recommendedPrice = barem optimizasyonu sonrası gerçek öneri (₺199 olabilir)
                             const baseRecommended = pr.recommendedPrice;
-                            const scenarios = calcBaremOptimization(pc, product.weightGrams, settings, baseRecommended);
+                            const scenarios = calcBaremOptimization(pc, product.weightGrams * qty, settings, baseRecommended);
                             const under200sc = scenarios.find(s => s.band === "under200");
                             const equivSc = scenarios.find(s => s.label.startsWith("Eşdeğer"));
                             if (!under200sc) return null;
@@ -892,7 +1005,7 @@ export function TrendyolCalculatorClient() {
                               <Row label={`Üretim Maliyeti${getProductionCostSuffix(product)}`} value={`₺${bd.productionCost.toFixed(2)}`} />
                               <Row label="Kutulama" value={`₺${bd.packagingCost.toFixed(2)}`} />
                               <Row label="Kargo (KDV dahil)" value={`₺${bd.shippingCost.toFixed(2)}`} color="text-amber-600" />
-                              <Row label="Platform Hizmet Bedeli (KDV dahil)" value={`₺${bd.platformFee.toFixed(2)}`} />
+                              <Row label={`Platform Bedeli${settings.useExpressPlatformFee ? " 🚀 Bugün Kargoda" : ""} (KDV dahil)`} value={`₺${bd.platformFee.toFixed(2)}`} />
                               <Row label="Sabit Gider" value={`₺${bd.fixedCost.toFixed(2)}`} />
                               <Row label={`İade Maliyeti (%${settings.returnRate})`} value={`₺${bd.returnCost.toFixed(2)}`} color="text-orange-600" />
                               <div className="border-t my-1" />
@@ -959,7 +1072,43 @@ export function TrendyolCalculatorClient() {
                     <p className="text-sm font-semibold">Trendyol Maliyetleri</p>
                     {numInput("t1", "Komisyon (%)", "commissionRate", "0.1", "Kategori komisyon oranınız")}
                     {numInput("t2", "Vade Farkı (%)", "paymentTermFee", "0.1", "Genellikle %3")}
-                    {numInput("t3", "Platform Bedeli (TL, KDV hariç)", "platformFeeBase", "0.01", "Varsayılan: 10.99 TL → KDV ile 13.19 TL")}
+
+                    {/* Platform Bedeli — Bugün Kargoda toggle */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium">Platform Hizmet Bedeli (KDV hariç)</p>
+                        <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+                          <input type="checkbox" checked={settings.useExpressPlatformFee}
+                            onChange={e => upd({ useExpressPlatformFee: e.target.checked })}
+                            className="w-3.5 h-3.5" />
+                          <span className={settings.useExpressPlatformFee ? "text-green-700 font-semibold" : "text-muted-foreground"}>
+                            🚀 Bugün Kargoda
+                          </span>
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label htmlFor="t3a" className="text-xs text-muted-foreground">Normal (10.99 TL)</Label>
+                          <Input id="t3a" type="number" step="0.01"
+                            value={settings.platformFeeBase}
+                            onChange={e => upd({ platformFeeBase: parseFloat(e.target.value) || 0 })}
+                            className={!settings.useExpressPlatformFee ? "border-orange-400" : ""} />
+                          <p className="text-xs text-muted-foreground mt-0.5">KDV dahil: ₺{(settings.platformFeeBase * 1.20).toFixed(2)}</p>
+                        </div>
+                        <div>
+                          <Label htmlFor="t3b" className="text-xs text-muted-foreground">Bugün Kargoda (4.99 TL)</Label>
+                          <Input id="t3b" type="number" step="0.01"
+                            value={settings.platformFeeExpress}
+                            onChange={e => upd({ platformFeeExpress: parseFloat(e.target.value) || 0 })}
+                            className={settings.useExpressPlatformFee ? "border-green-400" : ""} />
+                          <p className="text-xs text-muted-foreground mt-0.5">KDV dahil: ₺{(settings.platformFeeExpress * 1.20).toFixed(2)}</p>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Aktif: <strong>₺{((settings.useExpressPlatformFee ? settings.platformFeeExpress : settings.platformFeeBase) * 1.20).toFixed(2)}</strong> KDV dahil
+                      </p>
+                    </div>
+
                     {numInput("t4", "Kutulama (TL/sipariş)", "packagingCost", "0.5")}
                     {numInput("t5", "Hedef Net Kâr (%)", "profitMargin", "1", "Satış fiyatının bu yüzdesi net kâr olarak kalır")}
                   </section>
@@ -1069,9 +1218,9 @@ export function TrendyolCalculatorClient() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
-                  <Row label="Toplam Ürün" value={`${totals.qty} adet`} />
+                  <Row label="Ürün / Set" value={`${totals.qty} kalem (${totals.setCount} adet)`} />
                   <Row label="Üretim Maliyeti" value={`₺${totals.productionCost.toFixed(2)}`} />
-                  <Row label="Önerilen Gelir" value={`₺${totals.revenue.toFixed(2)}`} />
+                  <Row label="Toplam Gelir" value={`₺${totals.revenue.toFixed(2)}`} />
                   <div className="border-t pt-2 mt-2">
                     <Row label="Net Kâr (toplam)"
                       value={`₺${totals.netProfit.toFixed(2)}`}

@@ -198,15 +198,42 @@ export function BuyerOrdersClient({ buyerId }: { buyerId: string }) {
 
   const load = useCallback(async () => {
     let sb; try { sb = createClient(); } catch { setLoading(false); return; }
-    const [{ data: buyer }, { data: ordersData }] = await Promise.all([
-      sb.from("buyers").select("name").eq("id", buyerId).single(),
-      sb.from("orders")
-        .select("id, created_at, total_amount, paid_amount, status, notes, buyer:buyers(id,name), items:order_items(id,product_name,color,quantity,produced_quantity,delivered_quantity,unit_price,size_name,includes_candle)")
-        .eq("buyer_id", buyerId)
-        .order("created_at", { ascending: false }),
-    ]);
+
+    const { data: buyer } = await sb.from("buyers").select("name").eq("id", buyerId).single();
     if (buyer) setBuyerName((buyer as { name: string }).name);
-    setOrders((ordersData as unknown as Order[]) || []);
+
+    const { data: ordersData, error } = await sb
+      .from("orders")
+      .select("id, created_at, total_amount, paid_amount, status, notes, buyer_id")
+      .eq("buyer_id", buyerId)
+      .order("created_at", { ascending: false });
+
+    if (error || !ordersData || ordersData.length === 0) {
+      setOrders([]);
+      setLoading(false);
+      return;
+    }
+
+    const orderIds = (ordersData as any[]).map((o) => o.id);
+
+    const { data: itemsData } = await sb
+      .from("order_items")
+      .select("id, order_id, product_name, color, quantity, produced_quantity, delivered_quantity, unit_price, size_name, includes_candle")
+      .in("order_id", orderIds);
+
+    const itemsMap: Record<string, any[]> = {};
+    (itemsData || []).forEach((item: any) => {
+      if (!itemsMap[item.order_id]) itemsMap[item.order_id] = [];
+      itemsMap[item.order_id].push(item);
+    });
+
+    const list: Order[] = (ordersData as any[]).map((o: any) => ({
+      ...o,
+      buyer: { id: buyerId, name: (buyer as any)?.name || "Bilinmiyor" },
+      items: itemsMap[o.id] || [],
+    }));
+
+    setOrders(list);
     setLoading(false);
   }, [buyerId]);
 
