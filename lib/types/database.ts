@@ -739,6 +739,61 @@ export type PaymentInsert = Database["public"]["Tables"]["payments"]["Insert"];
 
 export type Color = Database["public"]["Tables"]["colors"]["Row"];
 
+// ─── Trendyol Catalog Tipleri ─────────────────────────────────────────────
+export interface Category {
+  id: string;
+  name: string;
+  trendyol_cat_id: number | null;
+  vat_rate: number;
+  commission_rate: number;
+  created_at: string;
+}
+
+export interface ProductTemplate {
+  id: string;
+  product_id: string | null;
+  category_id: string | null;
+  vat_rate: number;
+  desi: number | null;
+  cargo_company: string | null;
+  warranty_months: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TrendyolStatus = "draft" | "pending" | "approved" | "rejected" | "passive";
+
+export interface TrendyolListing {
+  id: string;
+  product_id: string | null;
+  category_id: string | null;
+  template_id: string | null;
+  title: string;
+  description: string;
+  barcode: string;
+  stock_code: string;
+  brand_name: string;
+  list_price: number;
+  sale_price: number;
+  vat_rate: number;
+  quantity: number;
+  image_urls: string[];
+  cargo_company: string | null;
+  desi: number | null;
+  warranty_months: number;
+  trendyol_status: TrendyolStatus;
+  trendyol_product_id: string | null;
+  rejection_reason: string | null;
+  batch_id: string | null;
+  submitted_at: string | null;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TrendyolListingInsert = Omit<TrendyolListing, "id" | "created_at" | "updated_at">;
+export type TrendyolListingUpdate = Partial<TrendyolListingInsert>;
+
 // Genişletilmiş tipler
 export type OrderWithDetails = Order & {
   buyer: Buyer;

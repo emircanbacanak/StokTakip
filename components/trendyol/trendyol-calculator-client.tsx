@@ -406,6 +406,8 @@ export function TrendyolCalculatorClient() {
   const [weightGrams, setWeightGrams] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [products, setProducts] = useState<TrendyolProduct[]>([]);
+  // Ürün başına harici fiyat simülatörü: productId → fiyat string
+  const [customPrices, setCustomPrices] = useState<Record<string, string>>({});
   const [catalogSuggestions, setCatalogSuggestions] = useState<Product[]>([]);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [pendingFlags, setPendingFlags] = useState<{ isCandleholder: boolean; isKeychain: boolean; isSoapdish: boolean }>({ isCandleholder: false, isKeychain: false, isSoapdish: false });
@@ -1031,6 +1033,152 @@ export function TrendyolCalculatorClient() {
                               <Row label="Kâr/Fiyat" value={`%${bd.netMarginOnPrice.toFixed(1)}`} color="text-blue-600" />
                             </div>
                           </details>
+
+                          {/* ── Harici Fiyat Simülatörü ── */}
+                          {(() => {
+                            const customPriceStr = customPrices[product.id] ?? "";
+                            const customPriceVal = parseFloat(customPriceStr);
+                            const hasCustom = !isNaN(customPriceVal) && customPriceVal > 0;
+
+                            // Girilen fiyatta kar hesapla
+                            const sim = hasCustom
+                              ? calcAtFixedPrice(customPriceVal, pc, product.weightGrams * qty, settings)
+                              : null;
+
+                            // Önerilen fiyat ile fark
+                            const priceDiff = hasCustom ? customPriceVal - pr.recommendedPrice : 0;
+                            const profitDiff = sim ? sim.netProfit - bd.netProfit : 0;
+                            // Komisyon + barem farkı
+                            const commissionAtCustom = hasCustom ? customPriceVal * (settings.commissionRate / 100) : 0;
+                            const commissionAtRecommended = pr.recommendedPrice * (settings.commissionRate / 100);
+                            const commissionDiff = commissionAtCustom - commissionAtRecommended;
+
+                            return (
+                              <div className="mt-3 pt-3 border-t-2 border-dashed border-purple-300 dark:border-purple-700">
+                                <p className="text-xs font-bold text-purple-700 dark:text-purple-300 mb-2 flex items-center gap-1.5">
+                                  🧮 Harici Fiyat Simülatörü
+                                  <span className="font-normal text-muted-foreground">— bu fiyata satarsam ne olur?</span>
+                                </p>
+                                <div className="flex gap-2 items-center mb-3">
+                                  <div className="relative flex-1">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">₺</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="5"
+                                      className="w-full pl-7 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-purple-400"
+                                      placeholder={`Örn: ${pr.recommendedPrice + 50}`}
+                                      value={customPriceStr}
+                                      onChange={e => setCustomPrices(prev => ({ ...prev, [product.id]: e.target.value }))}
+                                    />
+                                  </div>
+                                  {hasCustom && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setCustomPrices(prev => ({ ...prev, [product.id]: "" }))}
+                                      className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 border border-border rounded-lg"
+                                    >
+                                      Temizle
+                                    </button>
+                                  )}
+                                </div>
+
+                                {/* Simülasyon Sonucu */}
+                                {sim && (
+                                  <div className="space-y-2">
+                                    {/* Ana metrikler — 3 sütun */}
+                                    <div className="grid grid-cols-3 gap-2 text-xs">
+                                      {/* Net Kâr */}
+                                      <div className={`rounded-lg p-2.5 text-center border ${
+                                        sim.netProfit > bd.netProfit
+                                          ? "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-700"
+                                          : sim.netProfit < 0
+                                          ? "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-700"
+                                          : "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-700"
+                                      }`}>
+                                        <p className="text-muted-foreground mb-0.5">Net Kâr</p>
+                                        <p className={`font-bold text-base ${sim.netProfit > 0 ? "text-emerald-700 dark:text-emerald-300" : "text-red-700"}`}>
+                                          ₺{sim.netProfit.toFixed(2)}
+                                        </p>
+                                        <p className={`text-[11px] font-semibold mt-0.5 ${profitDiff >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                                          {profitDiff >= 0 ? "+" : ""}₺{profitDiff.toFixed(2)}
+                                        </p>
+                                      </div>
+                                      {/* Kâr Marjı */}
+                                      <div className="rounded-lg p-2.5 text-center border border-border bg-muted/20">
+                                        <p className="text-muted-foreground mb-0.5">Kâr Marjı</p>
+                                        <p className="font-bold text-base text-blue-700 dark:text-blue-300">
+                                          %{sim.netMarginOnPrice.toFixed(1)}
+                                        </p>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                                          hedef %{settings.profitMargin}
+                                        </p>
+                                      </div>
+                                      {/* Komisyon + Barem */}
+                                      <div className="rounded-lg p-2.5 text-center border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800">
+                                        <p className="text-muted-foreground mb-0.5">Komisyon</p>
+                                        <p className="font-bold text-base text-red-700 dark:text-red-300">
+                                          ₺{commissionAtCustom.toFixed(2)}
+                                        </p>
+                                        <p className={`text-[11px] font-semibold mt-0.5 ${commissionDiff >= 0 ? "text-red-600" : "text-emerald-600"}`}>
+                                          {commissionDiff >= 0 ? "+" : ""}₺{commissionDiff.toFixed(2)}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* Detay satırları */}
+                                    <div className="bg-muted/20 rounded-lg p-3 space-y-1.5 text-xs border border-border">
+                                      {/* Fiyat farkı açıklaması */}
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-muted-foreground">Fiyat farkı (önerilen vs senin)</span>
+                                        <span className={`font-semibold ${priceDiff >= 0 ? "text-blue-600" : "text-orange-600"}`}>
+                                          {priceDiff >= 0 ? "+" : ""}₺{priceDiff.toFixed(2)}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-muted-foreground">Kargo (barem etkisi dahil)</span>
+                                        <span className="font-semibold text-amber-600">₺{sim.shipping.toFixed(2)}</span>
+                                      </div>
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-muted-foreground">Vade farkı (%{settings.paymentTermFee})</span>
+                                        <span className="font-semibold text-red-600">−₺{(customPriceVal * settings.paymentTermFee / 100).toFixed(2)}</span>
+                                      </div>
+                                      {!settings.organicSalesMode && (
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-muted-foreground">Reklam (%{settings.advertisingRate})</span>
+                                          <span className="font-semibold text-orange-600">−₺{(customPriceVal * settings.advertisingRate / 100).toFixed(2)}</span>
+                                        </div>
+                                      )}
+                                      <div className="border-t pt-1.5 flex items-center justify-between font-semibold">
+                                        <span>Toplam Gider</span>
+                                        <span>₺{sim.totalExpenses.toFixed(2)}</span>
+                                      </div>
+                                    </div>
+
+                                    {/* Uyarı bandı */}
+                                    {customPriceVal < pr.breakEvenPrice && (
+                                      <div className="bg-red-50 dark:bg-red-950/20 border border-red-300 rounded-lg p-2.5 text-xs text-red-700 dark:text-red-300 font-semibold">
+                                        ⛔ Bu fiyat başabaş noktasının (₺{pr.breakEvenPrice}) altında — ZARAR EDERSİN
+                                      </div>
+                                    )}
+                                    {customPriceVal >= pr.breakEvenPrice && sim.netProfit < bd.netProfit && (
+                                      <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-300 rounded-lg p-2.5 text-xs text-amber-700 dark:text-amber-300">
+                                        ⚠️ Bu fiyatta daha az kazanıyorsun (₺{Math.abs(profitDiff).toFixed(2)} eksik). Fiyat artışı komisyon + barem kayıpları nedeniyle net kâra tam yansımıyor.
+                                      </div>
+                                    )}
+                                    {sim.netProfit > bd.netProfit && (
+                                      <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-300 rounded-lg p-2.5 text-xs text-emerald-700 dark:text-emerald-300">
+                                        ✅ Bu fiyatta ₺{profitDiff.toFixed(2)} daha fazla kazanıyorsun
+                                        {priceDiff > 0 && profitDiff < priceDiff && (
+                                          <span> — ama ₺{priceDiff.toFixed(2)} fiyat farkının sadece ₺{profitDiff.toFixed(2)}'si net kâra dönüşüyor (geri kalanı komisyon+barem)</span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}
