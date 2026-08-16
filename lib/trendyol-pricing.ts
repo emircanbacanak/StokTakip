@@ -29,16 +29,16 @@ export const DEFAULT_TRENDYOL_PRICING_SETTINGS: TrendyolPricingSettings = {
   electricityCostPerGram: 0.10,
   depreciationCostPerGram: 0.05,
   wastePercentage: 10,
-  commissionRate: 15,
+  commissionRate: 16,
   paymentTermFee: 3,
   packagingCost: 15,
   platformFeeBase: 10.99,
   fastShipping: true,
   advertisingRate: 8,
   returnRate: 5,
-  fixedCostPerOrder: 6,
-  organicSalesMode: false,
-  profitMargin: 30,
+  fixedCostPerOrder: 10,
+  organicSalesMode: true,
+  profitMargin: 20,
   candleholderCostPerUnit: 0,
   keychainCostPerUnit: 2,
   soapdishCostPerUnit: 0,
@@ -100,7 +100,7 @@ export function calcTrendyolPrice(
   }
 
   const price = priceUnder200 <= priceOver200 ? priceUnder200 : priceOver200;
-  let roundedPrice = Math.ceil(price / 5) * 5;
+  let roundedPrice = Math.ceil(price);
 
   for (let i = 0; i < 40; i += 1) {
     const shipping = calcShippingCost(weightGrams, roundedPrice, settings.fastShipping);
@@ -109,7 +109,7 @@ export function calcTrendyolPrice(
     const totalExpenses = baseCost + roundedPrice * cutRateOnGross + roundedPrice * adRate;
     const margin = roundedPrice > 0 ? (roundedPrice - totalExpenses) / roundedPrice : 0;
     if (margin >= m - 0.001) break; // hedef marja ulaştık
-    roundedPrice += 5;
+    roundedPrice += 1;
   }
 
   if (desi < 10 && roundedPrice > 199) {
@@ -149,9 +149,9 @@ export function calcTrendyolPrice(
 
   return {
     recommendedPrice: roundedPrice,
-    targetPrice: Math.ceil(price / 5) * 5,
+    targetPrice: Math.ceil(price),
     exactTargetPrice: price,
-    breakEvenPrice: Math.ceil(breakEven / 5) * 5,
+    breakEvenPrice: Math.ceil(breakEven),
   };
 }
 

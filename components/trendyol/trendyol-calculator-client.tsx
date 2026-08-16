@@ -41,7 +41,9 @@ interface TrendyolSettings {
   // Profesyonel Maliyetler
   advertisingRate: number;      // % — satış fiyatı üzerinden
   returnRate: number;           // % — iade oranı
-  fixedCostPerOrder: number;    // TL — muhasebe, fatura vb.
+  fixedCostPerOrder: number;    // TL — muhasebe, fatura vb. (monthlyFixedExpense / monthlyOrderTarget'tan otomatik hesaplanır)
+  monthlyFixedExpense: number;  // TL — aylık toplam sabit gider (muhasebe vb.)
+  monthlyOrderTarget: number;   // adet — aylık hedef sipariş adedi
   organicSalesMode: boolean;
 
   // Ekstra Malzemeler (ürün tipi başına sabit maliyet)
@@ -59,7 +61,7 @@ const DEFAULT_TRENDYOL_SETTINGS: TrendyolSettings = {
   depreciationCostPerGram: 0.05,
   wastePercentage: 10,
 
-  commissionRate: 15,
+  commissionRate: 16,  // Trendyol Ev Dekorasyon / Vazo kategorisi komisyonu (%16)
   paymentTermFee: 3,
   packagingCost: 15,
   platformFeeBase: 10.99,
@@ -70,14 +72,16 @@ const DEFAULT_TRENDYOL_SETTINGS: TrendyolSettings = {
 
   advertisingRate: 8,
   returnRate: 5,
-  fixedCostPerOrder: 6,
-  organicSalesMode: false,
+  fixedCostPerOrder: 10,
+  monthlyFixedExpense: 600,
+  monthlyOrderTarget: 60,
+  organicSalesMode: true, // Organik Satış varsayılan %0 reklam
 
   candleholderCostPerUnit: 0,
   keychainCostPerUnit: 2,
   soapdishCostPerUnit: 0,
 
-  profitMargin: 30,
+  profitMargin: 20, // KDV sonrası %20 net kâr marjı (fiyat üzerinden)
 };
 
 // ─── HESAPLAMA MANTIĞI ──────────────────────────────────────────────────────
@@ -85,24 +89,32 @@ const DEFAULT_TRENDYOL_SETTINGS: TrendyolSettings = {
 // Trendyol gerçek para akışı:
 //
 //   Alıcı → KDV dahil satış fiyatını öder (P)
-//   Trendyol faturası:
-//     - Komisyon = (P / 1+KDV%) × komisyon%   ← KDV HARİÇ fiyat üzerinden
-//     - Vade farkı = (P / 1+KDV%) × vade%     ← KDV HARİÇ fiyat üzerinden
-//     - Platform hizmet bedeli = sabit TL (KDV hariç + KDV)
-//   Satıcıya kalan = P - komisyon - vade - platform
 //
-//   Satıcının ödemeleri:
-//     - Kargo (KDV dahil) — kargo firması faturası
+//   Trendyol kesintileri (P'nin tamamı üzerinden, KDV dahil):
+//     - Komisyon  = P × komisyon%
+//     - Vade farkı = P × vade%
+//     - Platform hizmet bedeli = sabit TL (KDV dahil)
+//
+//   Satıcının nakit giderleri:
+//     - Kargo (KDV dahil fatura)
 //     - Üretim + paket + sabit gider + reklam + iade kaybı
 //
-// Kargo notu:
-//   Trendyol anlaşmalı kargo fiyatları KDV HARİÇ listelenmiştir.
-//   Satıcıya KDV dahil (×1.20) fatura edilir.
+//   Net kâr (KDV öncesi) = P - tüm giderler
 //
-// KDV notu:
-//   Satıcı KDV mükellefi ise kargodaki KDV'yi indirim konusu yapabilir.
-//   Ama basit/küçük işletme için kargo KDV'si gerçek maliyet sayılır.
-//   Bu hesaplayıcı KARGO KDV'Sİ DAHİL, nakit akış bazlı hesap yapar.
+// ─── KDV MANTIĞI (KDV Mükellefi Satıcı) ────────────────────────────────────
+//
+//   Satıcı P üzerinden KDV tahsil eder ve beyan eder:
+//     Tahsil edilen KDV = P / 6   (= P × 20/120)
+//
+//   Alışlardan (kargo faturası + platform faturası) ödenen KDV mahsup edilir:
+//     Mahsup KDV = kargo / 6 + platform / 6
+//
+//   Devlete ödenecek net KDV = tahsil − mahsup
+//
+//   Net kâr (KDV sonrası) = Net kâr (KDV öncesi) − devlete ödenecek KDV
+//
+// Not: Üretim maliyeti (hammadde, elektrik) üzerindeki KDV de mahsup
+//      edilebilir ancak bu hesaplayıcıda takip edilmemektedir (muhafazakâr).
 
 interface Breakdown {
   productionCost: number;
@@ -118,6 +130,17 @@ interface Breakdown {
   netProfit: number;
   netMarginOnCost: number;
   netMarginOnPrice: number;
+  // KDV hesabı (KDV mükellefi için)
+  vatCollected: number;        // Müşteriden tahsil edilen KDV (satış fiyatı / 6)
+  vatPaidOnInputs: number;     // Mahsup edilecek toplam KDV
+  vatPaidShipping: number;     // Kargo faturasındaki KDV
+  vatPaidPlatform: number;     // Platform faturasındaki KDV
+  vatPaidCommission: number;   // Komisyon faturasındaki KDV
+  vatPaidPaymentTerm: number;  // Vade farkı faturasındaki KDV
+  vatPaidFilament: number;     // Filament alışındaki KDV
+  vatPaidPackaging: number;    // Kutulama alışındaki KDV
+  vatPayable: number;          // Devlete ödenecek net KDV
+  netProfitAfterVat: number;   // KDV sonrası gerçek net kâr
 }
 
 interface PricingResult {
@@ -164,107 +187,129 @@ function calcProductionCost(weightGrams: number, s: TrendyolSettings): number {
 
 /**
  * Önerilen satış fiyatını ve kâr dökümünü hesaplar.
- *
- * Hedef: net kâr = satış fiyatı × (profitMargin / 100)  ← fiyat üzerinden kâr
- *   P − totalCutRate×P − baseCost = P × m
- *   P × (1 − totalCutRate − m) = baseCost
- *   P = baseCost / (1 − totalCutRate − m)
+ * Hedef: KDV sonrası net kâr = satış fiyatı × profitMargin %
+ * Fiyat iteratif olarak calcAtFixedPrice üzerinden bulunur.
  */
 function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number, s: TrendyolSettings, quantity: number = 1): PricingResult {
   const platformFee = getActivePlatformFee(s);
   const packagingCost = s.packagingCost;
   const fixedCost = s.fixedCostPerOrder;
   const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
-
-  const cutRateOnGross = (s.commissionRate + s.paymentTermFee) / 100;
-  const totalCutRate = cutRateOnGross + adRate;
-  const m = s.profitMargin / 100;
-  const denominator = 1 - totalCutRate - m;
-
+  const totalCutRate = (s.commissionRate + s.paymentTermFee) / 100 + adRate;
+  const m = s.profitMargin / 100;  // Hedef: netProfitAfterVat = price * m
+  const filamentCostForVat = (weightGramsTotal * (1 + s.wastePercentage / 100) / 1000) * s.filamentPricePerKg;
   const desi = gramsToDesi(weightGramsTotal);
 
-  // Fiyat P = setin satış fiyatı (müşteri bu fiyatı öder)
-  // Gelir = P (tek sipariş)
-  // Giderler: üretim(toplam) + kargo(1x) + paket(1x) + platform(1x) + sabit(1x) + iade + komisyon(P üzerinden)
-  // Net kâr hedefi: P × m
-  // P × (1 - cutRate - m) = sabit_giderler  →  P = sabit_giderler / denominator
+  // Herhangi bir fiyatta KDV sonrası net kâr tutarını hesapla
+  function netProfitAfterVatAt(p: number): number {
+    const r = calcAtFixedPrice(p, productionCostTotal, weightGramsTotal, s);
+    return r.netProfitAfterVat;
+  }
 
-  function calcFixedCost(shippingPrice: number): number {
-    const sh = calcShipping(weightGramsTotal, shippingPrice, s.fastShipping);
+  // Başabaş: KDV sonrası kâr = 0 → iteratif
+  let bePrice = 100;
+  for (let i = 0; i < 30; i++) {
+    const sh = calcShipping(weightGramsTotal, bePrice, s.fastShipping);
     const rc = (productionCostTotal + sh + packagingCost) * (s.returnRate / 100);
-    return productionCostTotal + sh + packagingCost + platformFee + fixedCost + rc;
-  }
-
-  // ── Barem altı ──
-  let priceUnder200 = Infinity;
-  if (desi < 10) {
-    const fg = calcFixedCost(199);
-    const p = fg / denominator;
-    if (p <= 199) priceUnder200 = p;
-  }
-
-  // ── Barem üstü ──
-  let priceOver200 = 200;
-  for (let i = 0; i < 20; i++) {
-    const fg = calcFixedCost(priceOver200);
-    const np = fg / denominator;
-    if (Math.abs(np - priceOver200) < 0.5) { priceOver200 = np; break; }
-    priceOver200 = np;
-  }
-
-  const price = priceUnder200 <= priceOver200 ? priceUnder200 : priceOver200;
-
-  // Başabaş
-  let bePrice = 150;
-  for (let i = 0; i < 20; i++) {
-    const fg = calcFixedCost(bePrice);
-    const np = fg / (1 - totalCutRate);
+    const baseCost = productionCostTotal + sh + packagingCost + platformFee + fixedCost + rc;
+    const vatNetRate = (1 - (s.commissionRate + s.paymentTermFee) / 100) / 6;
+    const fixedVat = (platformFee + filamentCostForVat + packagingCost + sh) / 6;
+    const np = (baseCost - fixedVat) / (1 - totalCutRate - vatNetRate);
     if (Math.abs(np - bePrice) < 0.5) { bePrice = np; break; }
     bePrice = np;
   }
 
-  // Yuvarlanmış fiyat
-  let roundedPrice = Math.ceil(price / 5) * 5;
-  for (let i = 0; i < 40; i++) {
-    const fg = calcFixedCost(roundedPrice);
-    const totalExp = fg + roundedPrice * (s.commissionRate / 100) + roundedPrice * (s.paymentTermFee / 100) + roundedPrice * adRate;
-    const rMargin = roundedPrice > 0 ? (roundedPrice - totalExp) / roundedPrice : 0;
-    if (rMargin >= m - 0.001) break;
-    roundedPrice += 5;
-  }
-
-  // ── Barem optimizasyonu ──
-  const targetPrice = roundedPrice;
-  if (desi < 10 && roundedPrice > 199) {
-    const fg199 = calcFixedCost(199);
-    const exp199 = fg199 + 199 * (s.commissionRate / 100) + 199 * (s.paymentTermFee / 100) + 199 * adRate;
-    const profit199 = 199 - exp199;
-    const margin199 = 199 > 0 ? profit199 / 199 : 0;
-
-    if (margin199 >= m) {
-      roundedPrice = 199;
-    } else {
-      const fgR = calcFixedCost(roundedPrice);
-      const expR = fgR + roundedPrice * (s.commissionRate / 100) + roundedPrice * (s.paymentTermFee / 100) + roundedPrice * adRate;
-      if (profit199 > roundedPrice - expR) roundedPrice = 199;
+  // ── Barem altı: 199 TL tavanında hedef kârı ulaşılıyor mu? ──
+  // Hedef: netProfitAfterVat >= price * m
+  let priceUnder200 = Infinity;
+  if (desi < 10) {
+    const targetProfitAt199 = 199 * m;
+    const actualProfitAt199 = netProfitAfterVatAt(199);
+    if (actualProfitAt199 >= targetProfitAt199 - 0.01) {
+      // 199'da hedef kâr yeterli — hassas arama
+      let lo = 50;
+      let hi = 199;
+      for (let i = 0; i < 50; i++) {
+        const mid = Math.ceil((lo + hi) / 2);
+        const midProfit = netProfitAfterVatAt(mid);
+        const targetProfit = mid * m;
+        if (midProfit >= targetProfit - 0.01) {
+          hi = mid;
+        } else {
+          lo = mid + 1;
+        }
+        if (hi - lo < 1) break;
+      }
+      priceUnder200 = hi;
+      if (netProfitAfterVatAt(priceUnder200) < priceUnder200 * m - 0.01) {
+        priceUnder200 += 1;
+      }
+      if (priceUnder200 > 199) priceUnder200 = 199;
     }
   }
 
-  // Breakdown — tümü P (set fiyatı) üzerinden
-  const rShipping = calcShipping(weightGramsTotal, roundedPrice, s.fastShipping);
+  // ── Barem üstü: 200-350 bandı — hedef kârı sağlayan net minimum fiyat ──
+  let priceOver200 = 200;
+  for (let i = 0; i < 300; i++) {
+    const targetProfit = priceOver200 * m;
+    const actualProfit = netProfitAfterVatAt(priceOver200);
+    if (actualProfit >= targetProfit - 0.01) break;
+    priceOver200 += 1;
+  }
+
+  const price = (isFinite(priceUnder200) && priceUnder200 <= priceOver200) ? priceUnder200 : priceOver200;
+
+  // Net Fiyat (Yuvarlama yok — 1 TL hassasiyetli tam fiyat)
+  let roundedPrice = Math.ceil(price);
+  for (let i = 0; i < 30; i++) {
+    const targetProfit = roundedPrice * m;
+    const actualProfit = netProfitAfterVatAt(roundedPrice);
+    if (actualProfit >= targetProfit - 0.01) break;
+    roundedPrice += 1;
+  }
+
+  // ── Barem optimizasyonu: 199'da daha mı kârlı? ──
+  const targetPrice = roundedPrice;
+  if (desi < 10 && roundedPrice > 199) {
+    const r199 = calcAtFixedPrice(199, productionCostTotal, weightGramsTotal, s);
+    const rRec = calcAtFixedPrice(roundedPrice, productionCostTotal, weightGramsTotal, s);
+    if (r199.netProfitAfterVat > rRec.netProfitAfterVat) {
+      roundedPrice = 199;
+    }
+  }
+
+  // Breakdown — tamamen calcAtFixedPrice ile tutarlı
+  const finalResult = calcAtFixedPrice(roundedPrice, productionCostTotal, weightGramsTotal, s);
+  const rShipping = finalResult.shipping;
   const rReturnCost = (productionCostTotal + rShipping + packagingCost) * (s.returnRate / 100);
   const rBaseCost = productionCostTotal + rShipping + packagingCost + platformFee + fixedCost + rReturnCost;
+  
+  // Kesintiler (KDV dahil Trendyol faturaları)
   const rCommission = roundedPrice * (s.commissionRate / 100);
   const rPaymentTermFee = roundedPrice * (s.paymentTermFee / 100);
   const rAdvertisingCost = roundedPrice * adRate;
-  const rTotalExpenses = rBaseCost + rCommission + rPaymentTermFee + rAdvertisingCost;
-  const rNetProfit = roundedPrice - rTotalExpenses;
+  
+  const rTotalExpenses = finalResult.totalExpenses;
+  const rNetProfit = finalResult.netProfit;
+
+  // KDV mahsup kalemleri — calcAtFixedPrice ile tutarlı
+  const vatCollected       = roundedPrice / 6;
+  
+  const vatPaidShipping    = rShipping / 6;
+  const vatPaidPlatform    = platformFee / 6;
+  const rCommissionForVat  = rCommission / 6;      // KDV dahil tutardan / 6
+  const rPaymentTermForVat = rPaymentTermFee / 6;  // KDV dahil tutardan / 6
+  const vatPaidFilament    = filamentCostForVat / 6;
+  const vatPaidPackaging   = packagingCost / 6;
+  const vatPaidOnInputs    = vatPaidShipping + vatPaidPlatform + rCommissionForVat + rPaymentTermForVat + vatPaidFilament + vatPaidPackaging;
+  const vatPayable         = Math.max(0, vatCollected - vatPaidOnInputs);
+  const netProfitAfterVat  = finalResult.netProfitAfterVat;
 
   return {
     recommendedPrice: roundedPrice,
     targetPrice,
     exactTargetPrice: price,
-    breakEvenPrice: Math.ceil(bePrice / 5) * 5,
+    breakEvenPrice: Math.ceil(bePrice),
     breakdown: {
       productionCost: productionCostTotal,
       packagingCost,
@@ -279,6 +324,16 @@ function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number
       netProfit: rNetProfit,                   // sipariş bazı toplam kâr
       netMarginOnCost: rBaseCost > 0 ? (rNetProfit / rBaseCost) * 100 : 0,
       netMarginOnPrice: roundedPrice > 0 ? (rNetProfit / roundedPrice) * 100 : 0,
+      vatCollected,
+      vatPaidOnInputs,
+      vatPaidShipping,
+      vatPaidPlatform,
+      vatPaidCommission: rCommissionForVat,
+      vatPaidPaymentTerm: rPaymentTermForVat,
+      vatPaidFilament,
+      vatPaidPackaging,
+      vatPayable,
+      netProfitAfterVat,
     },
   };
 }
@@ -315,78 +370,115 @@ interface BaremScenario {
 }
 
 /**
- * Verilen sabit fiyat noktasında kârı hesaplar (fiyat dışarıdan verilir).
- * Barem optimizasyonu için kullanılır.
+ * Verilen sabit fiyat noktasında KDV sonrası kârı hesaplar.
+ * Barem optimizasyonu ve simülatör için kullanılır.
  */
 function calcAtFixedPrice(price: number, productionCostTotal: number, weightGramsTotal: number, s: TrendyolSettings): {
-  shipping: number; netProfit: number; netMarginOnPrice: number; totalExpenses: number;
+  shipping: number; netProfit: number; netProfitAfterVat: number; netMarginOnPrice: number; netMarginAfterVat: number; totalExpenses: number;
 } {
   const platformFee = getActivePlatformFee(s);
   const packagingCost = s.packagingCost;
   const fixedCost = s.fixedCostPerOrder;
   const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
+  
   const shipping = calcShipping(weightGramsTotal, price, s.fastShipping);
   const returnCost = (productionCostTotal + shipping + packagingCost) * (s.returnRate / 100);
   const baseCost = productionCostTotal + shipping + packagingCost + platformFee + fixedCost + returnCost;
+  
+  // Trendyol Kesintileri (KDV dahil satış fiyatı üzerinden kesilir)
   const commission = price * (s.commissionRate / 100);
   const paymentTermFee = price * (s.paymentTermFee / 100);
   const advertisingCost = price * adRate;
-  const totalExpenses = baseCost + commission + paymentTermFee + advertisingCost;
+  const withholding = (price / 1.20) * 0.01; // %1 E-ticaret stopajı
+  
+  const totalExpenses = baseCost + commission + paymentTermFee + advertisingCost + withholding;
   const netProfit = price - totalExpenses;
-  return { shipping, netProfit, netMarginOnPrice: price > 0 ? (netProfit / price) * 100 : 0, totalExpenses };
+  
+  // KDV hesabı
+  const filamentCost = (weightGramsTotal * (1 + s.wastePercentage / 100) / 1000) * s.filamentPricePerKg;
+  const VAT_RATE = 0.20;  // Devlet sabit %20 KDV
+  
+  // Tahsil edilen KDV (satış fiyatından)
+  const vatCollected = price * VAT_RATE / (1 + VAT_RATE);  // = price / 6
+  
+  // Mahsup edilecek KDV (giderlerin KDV'si)
+  // Kargo, Platform, Komisyon, Vade, Reklam, Filament, Kutu — hepsi KDV'li faturalardır
+  const vatPaidShipping = shipping * VAT_RATE / (1 + VAT_RATE);
+  const vatPaidPlatform = platformFee * VAT_RATE / (1 + VAT_RATE);
+  const vatPaidCommission = commission * VAT_RATE / (1 + VAT_RATE);       // Komisyon / 6
+  const vatPaidPaymentTerm = paymentTermFee * VAT_RATE / (1 + VAT_RATE);   // Vade / 6
+  const vatPaidAdvertising = advertisingCost * VAT_RATE / (1 + VAT_RATE);  // Reklam / 6
+  const vatPaidFilament = filamentCost * VAT_RATE / (1 + VAT_RATE);
+  const vatPaidPackaging = packagingCost * VAT_RATE / (1 + VAT_RATE);
+  
+  const vatPaidOnInputs = vatPaidShipping + vatPaidPlatform + vatPaidCommission + vatPaidPaymentTerm + vatPaidAdvertising + vatPaidFilament + vatPaidPackaging;
+  const vatPayable = Math.max(0, vatCollected - vatPaidOnInputs);
+  const netProfitAfterVat = netProfit - vatPayable;
+  
+  return {
+    shipping,
+    netProfit,
+    netProfitAfterVat,
+    netMarginOnPrice: price > 0 ? (netProfit / price) * 100 : 0,
+    netMarginAfterVat: price > 0 ? (netProfitAfterVat / price) * 100 : 0,
+    totalExpenses,
+  };
 }
 
 /**
- * Her barem bandı için net kârı karşılaştırır.
- * Barem altı max (₺199) ile barem üstü farklı fiyat noktalarını karşılaştırır.
- * Eşdeğer fiyat: barem üstünde 199 ile aynı kârı veren minimum fiyat.
+ * Her barem bandı için KDV sonrası net kârı karşılaştırır.
  */
 function calcBaremOptimization(productionCost: number, weightGrams: number, s: TrendyolSettings, recommendedPrice: number): BaremScenario[] {
   const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
-  const totalCutRate = (s.commissionRate + s.paymentTermFee) / 100 + adRate; // brüt fiyat üzerinden
+  const totalCutRate = (s.commissionRate + s.paymentTermFee) / 100 + adRate;
+  const vatNetRate = (1 - (s.commissionRate + s.paymentTermFee) / 100) / 6;
+  const filamentCost = (weightGrams * (1 + s.wastePercentage / 100) / 1000) * s.filamentPricePerKg;
+  const platformFee = getActivePlatformFee(s);
+  const packagingCost = s.packagingCost;
+  const fixedCost = s.fixedCostPerOrder;
+  const fixedVatDeductions = (platformFee + filamentCost + packagingCost) / 6;
 
   const under200Max = 199;
   const band200Max = 349;
 
   const scenarios: Omit<BaremScenario, "isOptimal" | "priceDiff" | "profitDiff">[] = [];
 
+  // Başabaş fiyatı: KDV sonrası kâr = 0
   const calcExactPrice = (shippingPrice: number) => {
     const shipping = calcShipping(weightGrams, shippingPrice, s.fastShipping);
-    const platformFee = getActivePlatformFee(s);
-    const packagingCost = s.packagingCost;
-    const fixedCost = s.fixedCostPerOrder;
     const returnCost = (productionCost + shipping + packagingCost) * (s.returnRate / 100);
     const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
-    return baseCost / (1 - totalCutRate);
+    const cargoVatDeduction = shipping / 6;
+    return (baseCost - fixedVatDeductions - cargoVatDeduction) / (1 - totalCutRate - vatNetRate);
   };
 
   // 1) Barem altı: ₺199 tavan
   const r199 = calcAtFixedPrice(under200Max, productionCost, weightGrams, s);
   const exactUnder200 = calcExactPrice(under200Max);
-  scenarios.push({ label: "Barem Altı (₺199)", band: "under200", price: under200Max, exactTargetPrice: exactUnder200, ...r199 });
+  scenarios.push({ label: "Barem Altı (₺199)", band: "under200", price: under200Max, exactTargetPrice: exactUnder200, shipping: r199.shipping, netProfit: r199.netProfitAfterVat, netMarginOnPrice: r199.netMarginAfterVat, totalExpenses: r199.totalExpenses });
 
-  // 2) Barem üstü: 350+ bandı için tam % hedef fiyat
+  // 2) Barem üstü: 350+ bandı
   const exactOver = calcExactPrice(350);
   if (exactOver >= 350) {
     const rHigh = calcAtFixedPrice(exactOver, productionCost, weightGrams, s);
-    scenarios.push({ label: `Barem Üstü (₺${exactOver.toFixed(2)})`, band: "over350", price: exactOver, exactTargetPrice: exactOver, ...rHigh });
+    scenarios.push({ label: `Barem Üstü (₺${exactOver.toFixed(2)})`, band: "over350", price: exactOver, exactTargetPrice: exactOver, shipping: rHigh.shipping, netProfit: rHigh.netProfitAfterVat, netMarginOnPrice: rHigh.netMarginAfterVat, totalExpenses: rHigh.totalExpenses });
   }
 
-  // 4) Önerilen fiyat (hesaplayıcının seçtiği nokta)
+  // 3) Önerilen fiyat
   if (recommendedPrice >= 200) {
     const clampedRec = Math.min(recommendedPrice, band200Max);
     const rRec = calcAtFixedPrice(clampedRec, productionCost, weightGrams, s);
-    scenarios.push({ label: `Önerilen (₺${clampedRec})`, band: clampedRec < 350 ? "200to350" : "over350", price: clampedRec, exactTargetPrice: clampedRec, ...rRec });
+    scenarios.push({ label: `Önerilen (₺${clampedRec})`, band: clampedRec < 350 ? "200to350" : "over350", price: clampedRec, exactTargetPrice: clampedRec, shipping: rRec.shipping, netProfit: rRec.netProfitAfterVat, netMarginOnPrice: rRec.netMarginAfterVat, totalExpenses: rRec.totalExpenses });
   }
 
-  // 5) 350+ bandı varsa
+  // 4) 350+ bandı
   if (recommendedPrice >= 350) {
     const r3 = calcAtFixedPrice(recommendedPrice, productionCost, weightGrams, s);
-    scenarios.push({ label: `350+ (₺${recommendedPrice})`, band: "over350", price: recommendedPrice, exactTargetPrice: recommendedPrice, ...r3 });
+    scenarios.push({ label: `350+ (₺${recommendedPrice})`, band: "over350", price: recommendedPrice, exactTargetPrice: recommendedPrice, shipping: r3.shipping, netProfit: r3.netProfitAfterVat, netMarginOnPrice: r3.netMarginAfterVat, totalExpenses: r3.totalExpenses });
   }
 
   const maxProfit = Math.max(...scenarios.map(sc => sc.netProfit));
-  const net199Profit = r199.netProfit;
+  const net199Profit = r199.netProfitAfterVat;
 
   return scenarios.map(sc => ({
     ...sc,
@@ -477,7 +569,15 @@ export function TrendyolCalculatorClient() {
     setSuggestionsOpen(false);
   }
 
-  const upd = (patch: Partial<TrendyolSettings>) => setSettings(s => ({ ...s, ...patch }));
+  const upd = (patch: Partial<TrendyolSettings>) => setSettings(s => {
+    const next = { ...s, ...patch };
+    // Aylık gider veya hedef sipariş değiştiğinde fixedCostPerOrder otomatik güncellenir
+    if ('monthlyFixedExpense' in patch || 'monthlyOrderTarget' in patch) {
+      const mo = (next.monthlyOrderTarget ?? 0) > 0 ? (next.monthlyOrderTarget ?? 1) : 1;
+      next.fixedCostPerOrder = parseFloat(((next.monthlyFixedExpense ?? 0) / mo).toFixed(2));
+    }
+    return next;
+  });
 
   const removeProduct = (id: string) => setProducts(p => p.filter(x => x.id !== id));
 
@@ -556,14 +656,31 @@ export function TrendyolCalculatorClient() {
       ? calculateProductCost(p.weightGrams * qty, costSettingsForCalc, false, false, false).totalCost + extraPerUnit * qty
       : calculateProductCost(p.weightGrams, costSettingsForCalc, isCandleholder, isKeychain, isSoapdish).totalCost;
     const pr = calcTrendyolPrice(pc, p.weightGrams * qty, settings, qty);
+
+    // Gerçek satış fiyatı girilmişse onu kullan
+    const actualPriceStr = customPrices[p.id] ?? "";
+    const actualPriceVal = parseFloat(actualPriceStr);
+    const hasActual = !isNaN(actualPriceVal) && actualPriceVal > 0;
+    const activeRevenue = hasActual ? actualPriceVal : pr.recommendedPrice;
+
+    // Aktif fiyat üzerinden net kâr ve KDV
+    const activeSim = hasActual ? calcAtFixedPrice(actualPriceVal, pc, p.weightGrams * qty, settings) : null;
+    const activeNetProfit = hasActual ? activeSim!.netProfit : pr.breakdown.netProfit;
+    const netProfitAfterVat = hasActual ? activeSim!.netProfitAfterVat : pr.breakdown.netProfitAfterVat;
+    const vatPayable = hasActual
+      ? (activeSim!.netProfit - activeSim!.netProfitAfterVat)
+      : pr.breakdown.vatPayable;
+
     return {
       qty: acc.qty + 1,
       setCount: acc.setCount + qty,
       productionCost: acc.productionCost + pr.breakdown.productionCost,
-      revenue: acc.revenue + pr.recommendedPrice,
-      netProfit: acc.netProfit + pr.breakdown.netProfit,
+      revenue: acc.revenue + activeRevenue,
+      netProfit: acc.netProfit + activeNetProfit,
+      netProfitAfterVat: acc.netProfitAfterVat + netProfitAfterVat,
+      vatPayable: acc.vatPayable + vatPayable,
     };
-  }, { qty: 0, setCount: 0, productionCost: 0, revenue: 0, netProfit: 0 });
+  }, { qty: 0, setCount: 0, productionCost: 0, revenue: 0, netProfit: 0, netProfitAfterVat: 0, vatPayable: 0 });
 
   // Ayar inputu yardımcısı
   const numInput = (
@@ -698,12 +815,65 @@ export function TrendyolCalculatorClient() {
                         : costCalcUnit.totalCost;
 
                       const pr = calcTrendyolPrice(pc, product.weightGrams * qty, settings, qty);
-                      const bd = pr.breakdown;
-                      const cargoRatio = (bd.shippingCost / pr.recommendedPrice) * 100;
+
+                      // Gerçek satış fiyatı girilmişse tüm breakdown o fiyat üzerinden hesaplanır
+                      const actualPriceStr = customPrices[product.id] ?? "";
+                      const actualPriceVal = parseFloat(actualPriceStr);
+                      const hasActualPrice = !isNaN(actualPriceVal) && actualPriceVal > 0;
+                      const activePrice = hasActualPrice ? actualPriceVal : pr.recommendedPrice;
+
+                      const activeSim = hasActualPrice
+                        ? calcAtFixedPrice(actualPriceVal, pc, product.weightGrams * qty, settings)
+                        : null;
+
+                      // bd: her zaman aktif fiyat üzerinden breakdown
+                      const bd = hasActualPrice ? (() => {
+                        const platformFee = getActivePlatformFee(settings);
+                        const shipping = activeSim!.shipping;
+                        const commission = actualPriceVal * (settings.commissionRate / 100);
+                        const paymentTermFee = actualPriceVal * (settings.paymentTermFee / 100);
+                        const advertisingCost = actualPriceVal * (settings.organicSalesMode ? 0 : settings.advertisingRate / 100);
+                        const filamentCostForVat = (product.weightGrams * qty * (1 + settings.wastePercentage / 100) / 1000) * settings.filamentPricePerKg;
+                        const VAT_RATE = 0.20;  // Devlet sabit %20
+                        const vatCollected = actualPriceVal * VAT_RATE / (1 + VAT_RATE);
+                        const vatPaidShipping    = shipping * VAT_RATE / (1 + VAT_RATE);
+                        const vatPaidPlatform    = platformFee * VAT_RATE / (1 + VAT_RATE);
+                        const vatPaidCommission  = commission * VAT_RATE / (1 + VAT_RATE);
+                        const vatPaidPaymentTerm = paymentTermFee * VAT_RATE / (1 + VAT_RATE);
+                        const vatPaidAdvertising = advertisingCost * VAT_RATE / (1 + VAT_RATE);
+                        const vatPaidFilament    = filamentCostForVat * VAT_RATE / (1 + VAT_RATE);
+                        const vatPaidPackaging   = settings.packagingCost * VAT_RATE / (1 + VAT_RATE);
+                        const vatPaidOnInputs    = vatPaidShipping + vatPaidPlatform + vatPaidCommission + vatPaidPaymentTerm + vatPaidAdvertising + vatPaidFilament + vatPaidPackaging;
+                        const vatPayable = Math.max(0, vatCollected - vatPaidOnInputs);
+                        return {
+                          ...pr.breakdown,
+                          shippingCost: shipping,
+                          platformFee,
+                          commission,
+                          paymentTermFee,
+                          advertisingCost,
+                          totalExpenses: activeSim!.totalExpenses,
+                          netProfit: activeSim!.netProfit,
+                          netMarginOnCost: pr.breakdown.productionCost > 0 ? (activeSim!.netProfit / activeSim!.totalExpenses) * 100 : 0,
+                          netMarginOnPrice: actualPriceVal > 0 ? (activeSim!.netProfit / actualPriceVal) * 100 : 0,
+                          vatCollected,
+                          vatPaidOnInputs,
+                          vatPaidShipping,
+                          vatPaidPlatform,
+                          vatPaidCommission,
+                          vatPaidPaymentTerm,
+                          vatPaidFilament,
+                          vatPaidPackaging,
+                          vatPayable,
+                          netProfitAfterVat: activeSim!.netProfitAfterVat,
+                        };
+                      })() : pr.breakdown;
+
+                      const cargoRatio = (bd.shippingCost / activePrice) * 100;
 
                       // Fiyat optimizasyon kontrolü (200–215 TL arası için)
                       const optInput: NetProfitInput = {
-                        satisFiyati: pr.recommendedPrice,
+                        satisFiyati: activePrice,
                         productionCost: pc,
                         weightGrams: product.weightGrams,
                         packagingCost: settings.packagingCost,
@@ -778,10 +948,14 @@ export function TrendyolCalculatorClient() {
                             </div>
                             <div className="rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 p-2 text-center">
                               <p className="text-xs text-green-600 font-semibold">
-                                {product.quantity > 1 ? `${product.quantity}'li Set Fiyatı` : "Önerilen Fiyat"}
+                                {hasActualPrice ? "Gerçek Satış Fiyatın" : product.quantity > 1 ? `${product.quantity}'li Set Fiyatı` : "Önerilen Fiyat"}
                               </p>
-                              <p className="font-bold text-green-700 dark:text-green-300 text-lg">₺{pr.recommendedPrice}</p>
-                              <p className="text-xs text-green-500">%{settings.profitMargin} net kâr (fiyattan)</p>
+                              <p className="font-bold text-green-700 dark:text-green-300 text-lg">₺{activePrice}</p>
+                              {hasActualPrice
+                                ? <p className="text-xs text-blue-500">Öneri: ₺{pr.recommendedPrice}</p>
+                                : <p className="text-xs text-green-500">%{settings.profitMargin} net kâr (fiyattan)</p>
+                              }
+                              <p className="text-xs text-purple-600 font-semibold mt-0.5">KDV sonrası: ₺{bd.netProfitAfterVat.toFixed(2)}</p>
                             </div>
                           </div>
 
@@ -795,23 +969,23 @@ export function TrendyolCalculatorClient() {
                               </div>
                               <div className="text-center">
                                 <p className="text-muted-foreground">Set Satış Fiyatı</p>
-                                <p className="font-bold text-blue-700 dark:text-blue-300">₺{pr.recommendedPrice}</p>
+                                <p className="font-bold text-blue-700 dark:text-blue-300">₺{activePrice}</p>
                                 <p className="text-muted-foreground">tek sipariş</p>
                               </div>
                               <div className="text-center">
                                 <p className="text-muted-foreground">Set Kârı</p>
                                 <p className="font-bold text-emerald-700 dark:text-emerald-300">₺{bd.netProfit.toFixed(2)}</p>
-                                <p className="text-muted-foreground">tek sipariş</p>
+                                <p className="text-xs text-purple-600">KDV sonrası: ₺{bd.netProfitAfterVat.toFixed(2)}</p>
                               </div>
                             </div>
                           )}
 
                           {/* Kâr Uyarısı */}
-                          {bd.netProfit < 15 && (
+                          {bd.netProfitAfterVat < 10 && (
                             <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-lg p-3">
                               <p className="text-xs font-semibold text-red-700 dark:text-red-400">⚠️ Düşük Karlılık</p>
                               <p className="text-xs text-red-600 dark:text-red-300 mt-1">
-                                Net kâr ₺{bd.netProfit.toFixed(2)} — set satış veya fiyat artışı öneririz.
+                                KDV sonrası net kâr ₺{bd.netProfitAfterVat.toFixed(2)} — set satış veya fiyat artışı öneririz.
                               </p>
                             </div>
                           )}
@@ -996,6 +1170,122 @@ export function TrendyolCalculatorClient() {
                             );
                           })()}
 
+                          {/* ── Gerçek Satış Fiyatı ── */}
+                          {(() => {
+                            const customPriceStr = customPrices[product.id] ?? "";
+                            const customPriceVal = parseFloat(customPriceStr);
+                            const hasCustom = !isNaN(customPriceVal) && customPriceVal > 0;
+
+                            const sim = hasCustom ? activeSim : null;
+
+                            const priceDiff = hasCustom ? customPriceVal - pr.recommendedPrice : 0;
+                            const profitDiff = sim ? sim.netProfit - (hasActualPrice ? pr.breakdown.netProfit : bd.netProfit) : 0;
+                            const commissionAtCustom = hasCustom ? customPriceVal * (settings.commissionRate / 100) : 0;
+                            const commissionAtRecommended = pr.recommendedPrice * (settings.commissionRate / 100);
+                            const commissionDiff = commissionAtCustom - commissionAtRecommended;
+                            const simVatPayable = hasCustom ? bd.vatPayable : 0;
+                            const simNetProfitAfterVat = hasCustom ? bd.netProfitAfterVat : 0;
+
+                            return (
+                              <div className="mt-3 pt-3 border-t-2 border-dashed border-purple-300 dark:border-purple-700">
+                                <p className="text-xs font-bold text-purple-700 dark:text-purple-300 mb-2 flex items-center gap-1.5">
+                                  💰 Gerçek Satış Fiyatım
+                                  <span className="font-normal text-muted-foreground">— girince tüm hesap bu fiyata göre güncellenir</span>
+                                </p>
+                                <div className="flex gap-2 items-center mb-3">
+                                  <div className="relative flex-1">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">₺</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="5"
+                                      className="w-full pl-7 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-purple-400"
+                                      placeholder={`Örn: ${pr.recommendedPrice + 50}`}
+                                      value={customPriceStr}
+                                      onChange={e => setCustomPrices(prev => ({ ...prev, [product.id]: e.target.value }))}
+                                    />
+                                  </div>
+                                  {hasCustom && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setCustomPrices(prev => ({ ...prev, [product.id]: "" }))}
+                                      className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 border border-border rounded-lg"
+                                    >
+                                      Temizle
+                                    </button>
+                                  )}
+                                </div>
+
+                                {sim && (
+                                  <div className="space-y-2">
+                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                      <div className={`rounded-lg p-2.5 text-center border ${sim.netProfit > 0 ? "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-700" : "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-700"}`}>
+                                        <p className="text-muted-foreground mb-0.5">Net Kâr</p>
+                                        <p className={`font-bold text-base ${sim.netProfit > 0 ? "text-emerald-700 dark:text-emerald-300" : "text-red-700"}`}>₺{sim.netProfit.toFixed(2)}</p>
+                                        <p className={`text-[11px] font-semibold mt-0.5 ${profitDiff >= 0 ? "text-emerald-600" : "text-red-600"}`}>{profitDiff >= 0 ? "+" : ""}₺{profitDiff.toFixed(2)}</p>
+                                      </div>
+                                      <div className={`rounded-lg p-2.5 text-center border ${simNetProfitAfterVat > 0 ? "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-700" : "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-700"}`}>
+                                        <p className="text-muted-foreground mb-0.5">Net Kâr (KDV sonrası)</p>
+                                        <p className={`font-bold text-base ${simNetProfitAfterVat > 0 ? "text-purple-700 dark:text-purple-300" : "text-red-700"}`}>₺{simNetProfitAfterVat.toFixed(2)}</p>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">KDV: −₺{simVatPayable.toFixed(2)}</p>
+                                      </div>
+                                      <div className="rounded-lg p-2.5 text-center border border-border bg-muted/20">
+                                        <p className="text-muted-foreground mb-0.5">Kâr Marjı</p>
+                                        <p className="font-bold text-base text-blue-700 dark:text-blue-300">%{sim.netMarginOnPrice.toFixed(1)}</p>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">hedef %{settings.profitMargin}</p>
+                                      </div>
+                                      <div className="rounded-lg p-2.5 text-center border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800">
+                                        <p className="text-muted-foreground mb-0.5">Komisyon</p>
+                                        <p className="font-bold text-base text-red-700 dark:text-red-300">₺{commissionAtCustom.toFixed(2)}</p>
+                                        <p className={`text-[11px] font-semibold mt-0.5 ${commissionDiff >= 0 ? "text-red-600" : "text-emerald-600"}`}>{commissionDiff >= 0 ? "+" : ""}₺{commissionDiff.toFixed(2)}</p>
+                                      </div>
+                                    </div>
+                                    <div className="bg-muted/20 rounded-lg p-3 space-y-1.5 text-xs border border-border">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-muted-foreground">Fiyat farkı (önerilen vs senin)</span>
+                                        <span className={`font-semibold ${priceDiff >= 0 ? "text-blue-600" : "text-orange-600"}`}>{priceDiff >= 0 ? "+" : ""}₺{priceDiff.toFixed(2)}</span>
+                                      </div>
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-muted-foreground">Kargo (barem etkisi dahil)</span>
+                                        <span className="font-semibold text-amber-600">₺{sim.shipping.toFixed(2)}</span>
+                                      </div>
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-muted-foreground">Vade farkı (%{settings.paymentTermFee})</span>
+                                        <span className="font-semibold text-red-600">−₺{(customPriceVal * settings.paymentTermFee / 100).toFixed(2)}</span>
+                                      </div>
+                                      {!settings.organicSalesMode && (
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-muted-foreground">Reklam (%{settings.advertisingRate})</span>
+                                          <span className="font-semibold text-orange-600">−₺{(customPriceVal * settings.advertisingRate / 100).toFixed(2)}</span>
+                                        </div>
+                                      )}
+                                      <div className="border-t pt-1.5 flex items-center justify-between font-semibold">
+                                        <span>Toplam Gider</span>
+                                        <span>₺{sim.totalExpenses.toFixed(2)}</span>
+                                      </div>
+                                    </div>
+                                    {customPriceVal < pr.breakEvenPrice && (
+                                      <div className="bg-red-50 dark:bg-red-950/20 border border-red-300 rounded-lg p-2.5 text-xs text-red-700 dark:text-red-300 font-semibold">
+                                        ⛔ Bu fiyat başabaş noktasının (₺{pr.breakEvenPrice}) altında — ZARAR EDERSİN
+                                      </div>
+                                    )}
+                                    {customPriceVal >= pr.breakEvenPrice && sim.netProfit < bd.netProfit && (
+                                      <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-300 rounded-lg p-2.5 text-xs text-amber-700 dark:text-amber-300">
+                                        ⚠️ Bu fiyatta daha az kazanıyorsun (₺{Math.abs(profitDiff).toFixed(2)} eksik).
+                                      </div>
+                                    )}
+                                    {sim.netProfit > bd.netProfit && (
+                                      <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-300 rounded-lg p-2.5 text-xs text-emerald-700 dark:text-emerald-300">
+                                        ✅ Bu fiyatta ₺{profitDiff.toFixed(2)} daha fazla kazanıyorsun
+                                        {priceDiff > 0 && profitDiff < priceDiff && <span> — ₺{priceDiff.toFixed(2)} fiyat farkının sadece ₺{profitDiff.toFixed(2)}'si net kâra dönüşüyor</span>}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+
                           {/* Detaylı Döküm */}
                           <details className="group">
                             <summary className="cursor-pointer text-xs font-semibold text-muted-foreground hover:text-foreground flex items-center gap-2 py-1">
@@ -1022,163 +1312,31 @@ export function TrendyolCalculatorClient() {
                               )}
                               <div className="border-t-2 mt-2 pt-2" />
                               <Row label="Toplam Gider" value={`₺${bd.totalExpenses.toFixed(2)}`} bold />
-                              <Row label="Satış Fiyatı" value={`₺${pr.recommendedPrice}`} bold />
-                              <Row
-                                label="Net Kâr"
-                                value={`₺${bd.netProfit.toFixed(2)}`}
-                                bold
-                                color={bd.netProfit >= 15 ? "text-emerald-600" : "text-red-600"}
-                              />
+                              <Row label="Satış Fiyatı" value={`₺${activePrice}`} bold />
+                              <Row label="Net Kâr" value={`₺${bd.netProfit.toFixed(2)}`} bold color={bd.netProfit >= 15 ? "text-emerald-600" : "text-red-600"} />
                               <Row label="Kâr/Maliyet" value={`%${bd.netMarginOnCost.toFixed(1)}`} color="text-emerald-600" />
                               <Row label="Kâr/Fiyat" value={`%${bd.netMarginOnPrice.toFixed(1)}`} color="text-blue-600" />
+                              <div className="border-t my-1" />
+                              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-1">KDV Hesabı (Mükellefi)</p>
+                              <Row label="Tahsil Edilen KDV" value={`₺${bd.vatCollected.toFixed(2)}`} color="text-slate-500" />
+                              <details className="mt-1">
+                                <summary className="text-[10px] text-muted-foreground cursor-pointer select-none hover:text-foreground pl-1 mb-0.5">
+                                  Mahsup Kalemleri (−₺{bd.vatPaidOnInputs.toFixed(2)})
+                                </summary>
+                                <div className="pl-2 mt-0.5 space-y-0.5">
+                                  <Row label="  └ Kargo KDV'si" value={`−₺${bd.vatPaidShipping.toFixed(2)}`} color="text-slate-400" />
+                                  <Row label="  └ Platform KDV'si" value={`−₺${bd.vatPaidPlatform.toFixed(2)}`} color="text-slate-400" />
+                                  <Row label="  └ Komisyon KDV'si" value={`−₺${bd.vatPaidCommission.toFixed(2)}`} color="text-slate-400" />
+                                  <Row label="  └ Vade Farkı KDV'si" value={`−₺${bd.vatPaidPaymentTerm.toFixed(2)}`} color="text-slate-400" />
+                                  <Row label="  └ Filament KDV'si" value={`−₺${bd.vatPaidFilament.toFixed(2)}`} color="text-slate-400" />
+                                  <Row label="  └ Kutulama KDV'si" value={`−₺${bd.vatPaidPackaging.toFixed(2)}`} color="text-slate-400" />
+                                </div>
+                              </details>
+                              <Row label="Toplam Mahsup" value={`−₺${bd.vatPaidOnInputs.toFixed(2)}`} color="text-slate-500" bold />
+                              <Row label="Devlete Ödenecek KDV" value={`−₺${bd.vatPayable.toFixed(2)}`} color="text-purple-600" bold />
+                              <Row label="Net Kâr (KDV sonrası)" value={`₺${bd.netProfitAfterVat.toFixed(2)}`} bold color={bd.netProfitAfterVat >= 10 ? "text-emerald-600" : "text-red-600"} />
                             </div>
                           </details>
-
-                          {/* ── Harici Fiyat Simülatörü ── */}
-                          {(() => {
-                            const customPriceStr = customPrices[product.id] ?? "";
-                            const customPriceVal = parseFloat(customPriceStr);
-                            const hasCustom = !isNaN(customPriceVal) && customPriceVal > 0;
-
-                            // Girilen fiyatta kar hesapla
-                            const sim = hasCustom
-                              ? calcAtFixedPrice(customPriceVal, pc, product.weightGrams * qty, settings)
-                              : null;
-
-                            // Önerilen fiyat ile fark
-                            const priceDiff = hasCustom ? customPriceVal - pr.recommendedPrice : 0;
-                            const profitDiff = sim ? sim.netProfit - bd.netProfit : 0;
-                            // Komisyon + barem farkı
-                            const commissionAtCustom = hasCustom ? customPriceVal * (settings.commissionRate / 100) : 0;
-                            const commissionAtRecommended = pr.recommendedPrice * (settings.commissionRate / 100);
-                            const commissionDiff = commissionAtCustom - commissionAtRecommended;
-
-                            return (
-                              <div className="mt-3 pt-3 border-t-2 border-dashed border-purple-300 dark:border-purple-700">
-                                <p className="text-xs font-bold text-purple-700 dark:text-purple-300 mb-2 flex items-center gap-1.5">
-                                  🧮 Harici Fiyat Simülatörü
-                                  <span className="font-normal text-muted-foreground">— bu fiyata satarsam ne olur?</span>
-                                </p>
-                                <div className="flex gap-2 items-center mb-3">
-                                  <div className="relative flex-1">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">₺</span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="5"
-                                      className="w-full pl-7 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-purple-400"
-                                      placeholder={`Örn: ${pr.recommendedPrice + 50}`}
-                                      value={customPriceStr}
-                                      onChange={e => setCustomPrices(prev => ({ ...prev, [product.id]: e.target.value }))}
-                                    />
-                                  </div>
-                                  {hasCustom && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setCustomPrices(prev => ({ ...prev, [product.id]: "" }))}
-                                      className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 border border-border rounded-lg"
-                                    >
-                                      Temizle
-                                    </button>
-                                  )}
-                                </div>
-
-                                {/* Simülasyon Sonucu */}
-                                {sim && (
-                                  <div className="space-y-2">
-                                    {/* Ana metrikler — 3 sütun */}
-                                    <div className="grid grid-cols-3 gap-2 text-xs">
-                                      {/* Net Kâr */}
-                                      <div className={`rounded-lg p-2.5 text-center border ${
-                                        sim.netProfit > bd.netProfit
-                                          ? "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-700"
-                                          : sim.netProfit < 0
-                                          ? "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-700"
-                                          : "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-700"
-                                      }`}>
-                                        <p className="text-muted-foreground mb-0.5">Net Kâr</p>
-                                        <p className={`font-bold text-base ${sim.netProfit > 0 ? "text-emerald-700 dark:text-emerald-300" : "text-red-700"}`}>
-                                          ₺{sim.netProfit.toFixed(2)}
-                                        </p>
-                                        <p className={`text-[11px] font-semibold mt-0.5 ${profitDiff >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                                          {profitDiff >= 0 ? "+" : ""}₺{profitDiff.toFixed(2)}
-                                        </p>
-                                      </div>
-                                      {/* Kâr Marjı */}
-                                      <div className="rounded-lg p-2.5 text-center border border-border bg-muted/20">
-                                        <p className="text-muted-foreground mb-0.5">Kâr Marjı</p>
-                                        <p className="font-bold text-base text-blue-700 dark:text-blue-300">
-                                          %{sim.netMarginOnPrice.toFixed(1)}
-                                        </p>
-                                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                                          hedef %{settings.profitMargin}
-                                        </p>
-                                      </div>
-                                      {/* Komisyon + Barem */}
-                                      <div className="rounded-lg p-2.5 text-center border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800">
-                                        <p className="text-muted-foreground mb-0.5">Komisyon</p>
-                                        <p className="font-bold text-base text-red-700 dark:text-red-300">
-                                          ₺{commissionAtCustom.toFixed(2)}
-                                        </p>
-                                        <p className={`text-[11px] font-semibold mt-0.5 ${commissionDiff >= 0 ? "text-red-600" : "text-emerald-600"}`}>
-                                          {commissionDiff >= 0 ? "+" : ""}₺{commissionDiff.toFixed(2)}
-                                        </p>
-                                      </div>
-                                    </div>
-
-                                    {/* Detay satırları */}
-                                    <div className="bg-muted/20 rounded-lg p-3 space-y-1.5 text-xs border border-border">
-                                      {/* Fiyat farkı açıklaması */}
-                                      <div className="flex items-center justify-between">
-                                        <span className="text-muted-foreground">Fiyat farkı (önerilen vs senin)</span>
-                                        <span className={`font-semibold ${priceDiff >= 0 ? "text-blue-600" : "text-orange-600"}`}>
-                                          {priceDiff >= 0 ? "+" : ""}₺{priceDiff.toFixed(2)}
-                                        </span>
-                                      </div>
-                                      <div className="flex items-center justify-between">
-                                        <span className="text-muted-foreground">Kargo (barem etkisi dahil)</span>
-                                        <span className="font-semibold text-amber-600">₺{sim.shipping.toFixed(2)}</span>
-                                      </div>
-                                      <div className="flex items-center justify-between">
-                                        <span className="text-muted-foreground">Vade farkı (%{settings.paymentTermFee})</span>
-                                        <span className="font-semibold text-red-600">−₺{(customPriceVal * settings.paymentTermFee / 100).toFixed(2)}</span>
-                                      </div>
-                                      {!settings.organicSalesMode && (
-                                        <div className="flex items-center justify-between">
-                                          <span className="text-muted-foreground">Reklam (%{settings.advertisingRate})</span>
-                                          <span className="font-semibold text-orange-600">−₺{(customPriceVal * settings.advertisingRate / 100).toFixed(2)}</span>
-                                        </div>
-                                      )}
-                                      <div className="border-t pt-1.5 flex items-center justify-between font-semibold">
-                                        <span>Toplam Gider</span>
-                                        <span>₺{sim.totalExpenses.toFixed(2)}</span>
-                                      </div>
-                                    </div>
-
-                                    {/* Uyarı bandı */}
-                                    {customPriceVal < pr.breakEvenPrice && (
-                                      <div className="bg-red-50 dark:bg-red-950/20 border border-red-300 rounded-lg p-2.5 text-xs text-red-700 dark:text-red-300 font-semibold">
-                                        ⛔ Bu fiyat başabaş noktasının (₺{pr.breakEvenPrice}) altında — ZARAR EDERSİN
-                                      </div>
-                                    )}
-                                    {customPriceVal >= pr.breakEvenPrice && sim.netProfit < bd.netProfit && (
-                                      <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-300 rounded-lg p-2.5 text-xs text-amber-700 dark:text-amber-300">
-                                        ⚠️ Bu fiyatta daha az kazanıyorsun (₺{Math.abs(profitDiff).toFixed(2)} eksik). Fiyat artışı komisyon + barem kayıpları nedeniyle net kâra tam yansımıyor.
-                                      </div>
-                                    )}
-                                    {sim.netProfit > bd.netProfit && (
-                                      <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-300 rounded-lg p-2.5 text-xs text-emerald-700 dark:text-emerald-300">
-                                        ✅ Bu fiyatta ₺{profitDiff.toFixed(2)} daha fazla kazanıyorsun
-                                        {priceDiff > 0 && profitDiff < priceDiff && (
-                                          <span> — ama ₺{priceDiff.toFixed(2)} fiyat farkının sadece ₺{profitDiff.toFixed(2)}'si net kâra dönüşüyor (geri kalanı komisyon+barem)</span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()}
                         </div>
                       );
                     })}
@@ -1218,7 +1376,7 @@ export function TrendyolCalculatorClient() {
                   {/* Trendyol */}
                   <section className="space-y-3">
                     <p className="text-sm font-semibold">Trendyol Maliyetleri</p>
-                    {numInput("t1", "Komisyon (%)", "commissionRate", "0.1", "Kategori komisyon oranınız")}
+                    {numInput("t1", "Trendyol Komisyonu (%)", "commissionRate", "0.1", "Hakediş raporunda yazıyorsa o oranı gir")}
                     {numInput("t2", "Vade Farkı (%)", "paymentTermFee", "0.1", "Genellikle %3")}
 
                     {/* Platform Bedeli — Bugün Kargoda toggle */}
@@ -1292,7 +1450,41 @@ export function TrendyolCalculatorClient() {
                     </div>
                     {!settings.organicSalesMode && numInput("p1", "Reklam (%)", "advertisingRate", "0.1", "Satış fiyatının yüzdesi")}
                     {numInput("p2", "İade Oranı (%)", "returnRate", "0.1", "Üretim+kargo+paket kaybı bu oran kadar eklenir")}
-                    {numInput("p3", "Sabit Gider (TL/sipariş)", "fixedCostPerOrder", "0.5", "Muhasebe, e-fatura, vergi payı")}
+                    <div className="space-y-3 p-3 border rounded-lg bg-muted/30">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Sabit Gider Hesabı</p>
+                      <div>
+                        <Label htmlFor="p3a">Aylık Sabit Gider (TL)</Label>
+                        <Input
+                          id="p3a"
+                          type="number"
+                          step="50"
+                          value={settings.monthlyFixedExpense ?? ""}
+                          onChange={e => upd({ monthlyFixedExpense: parseFloat(e.target.value) || 0 })}
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">Muhasebeci, e-fatura, vergi vb. aylık toplam gider</p>
+                      </div>
+                      <div>
+                        <Label htmlFor="p3b">Aylık Satış Hedefiniz (adet)</Label>
+                        <Input
+                          id="p3b"
+                          type="number"
+                          step="1"
+                          min="1"
+                          value={settings.monthlyOrderTarget ?? ""}
+                          onChange={e => upd({ monthlyOrderTarget: parseInt(e.target.value) || 1 })}
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">Hedef sipariş adedi — arttıkça sipariş başına maliyet düşer</p>
+                      </div>
+                      <div className="flex items-center justify-between rounded-md bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 px-3 py-2">
+                        <span className="text-xs text-muted-foreground">Sipariş başına sabit gider</span>
+                        <span className="text-sm font-bold text-orange-600">
+                          ₺{((settings.monthlyOrderTarget ?? 0) > 0
+                            ? (settings.monthlyFixedExpense ?? 0) / (settings.monthlyOrderTarget ?? 1)
+                            : (settings.monthlyFixedExpense ?? 0)
+                          ).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
                   </section>
 
                   <div className="border-t" />
@@ -1369,11 +1561,17 @@ export function TrendyolCalculatorClient() {
                   <Row label="Ürün / Set" value={`${totals.qty} kalem (${totals.setCount} adet)`} />
                   <Row label="Üretim Maliyeti" value={`₺${totals.productionCost.toFixed(2)}`} />
                   <Row label="Toplam Gelir" value={`₺${totals.revenue.toFixed(2)}`} />
-                  <div className="border-t pt-2 mt-2">
-                    <Row label="Net Kâr (toplam)"
+                  <div className="border-t pt-2 mt-2 space-y-1">
+                    <Row label="Net Kâr (KDV öncesi)"
                       value={`₺${totals.netProfit.toFixed(2)}`}
-                      bold
                       color={totals.netProfit > 0 ? "text-emerald-700 dark:text-emerald-400" : "text-red-600"} />
+                    <Row label="Devlete KDV"
+                      value={`−₺${totals.vatPayable.toFixed(2)}`}
+                      color="text-purple-600" />
+                    <Row label="Net Kâr (KDV sonrası)"
+                      value={`₺${totals.netProfitAfterVat.toFixed(2)}`}
+                      bold
+                      color={totals.netProfitAfterVat > 0 ? "text-emerald-700 dark:text-emerald-400" : "text-red-600"} />
                   </div>
                 </CardContent>
               </Card>

@@ -7,9 +7,26 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Truck, Package, Calculator } from "lucide-react";
 
-// Trendyol anlaşmalı kargo fiyatları (KDV HARİÇ, TL) - 22 Mayıs 2026
+// Barem altı fiyatlar (KDV HARİÇ, TL) - 10 Ağustos 2026
+// Sütunlar: Aras, DHL eCommerce, Kolay Gelsin, PTT, Sürat, TEX, YK
+// CEVA Tedarik, CEVA ve Horoz barem altı uygulamasına dahil değildir.
+const BAREM_ALTI_AVANTAJLI = {
+  // Avantajlı: 1 günlük termin VE/VEYA Hızlı Teslimat/Bugün Kargoda etiketine göre başarılı teslimat
+  "0-199.99": [48.33, 57.08, 55.83, 38.74, 54.58, 38.74, 83.33],
+  "200-349.99": [79.16, 87.91, 86.66, 70.41, 85.41, 70.41, 113.33],
+};
+
+const BAREM_ALTI_STANDART = {
+  // Standart: 1 günden fazla termin veya etikete rağmen başarısız erken teslimat
+  "0-199.99": [80.83, 89.58, 88.33, 73.33, 87.08, 73.33, 114.16],
+  "200-349.99": [86.24, 94.99, 93.74, 78.74, 92.49, 78.74, 119.16],
+};
+
+const BAREM_COMPANIES = ["Aras", "DHL eCommerce", "Kolay Gelsin", "PTT", "Sürat", "TEX", "Yurtiçi"];
+
+// Trendyol anlaşmalı kargo fiyatları (KDV HARİÇ, TL) - 10 Ağustos 2026
 // Sütunlar: Aras, DHL, KolayGelsin, PTT, Surat, TEX, Yurtici, CEVATedarik, CEVA, Horoz
-const CARGO_PRICES: Record<number, number[]> = {
+const CARGO_PRICES: Record<number, (number | null)[]> = {
   0: [83.93, 92.99, 91.99, 77.54, 89.71, 77.54, 112.77, 468.62, 651.74, 567.76],
   1: [83.93, 92.99, 91.99, 77.54, 89.71, 77.54, 112.77, 468.62, 651.74, 567.76],
   2: [83.93, 92.99, 91.99, 77.54, 89.71, 77.54, 112.77, 468.62, 651.74, 567.76],
@@ -190,6 +207,7 @@ export function CargoPriceCalculator() {
   const [height, setHeight] = useState("");
   const [depth, setDepth] = useState("");
   const [weightKg, setWeightKg] = useState("");
+  const [orderAmount, setOrderAmount] = useState("");
   // Kargo fiyatları her zaman KDV dahil gösterilir (%20 KDV)
   const includeVat = true;
 
@@ -225,6 +243,23 @@ export function CargoPriceCalculator() {
     return valid.reduce((a, b) => ((a.price ?? Infinity) < (b.price ?? Infinity) ? a : b));
   }, [prices]);
 
+  // Barem altı hesaplama
+  const baremAlti = useMemo(() => {
+    const amount = parseFloat(orderAmount);
+    if (isNaN(amount) || amount <= 0 || amount >= 350) return null;
+    const vatMultiplier = includeVat ? 1.20 : 1.0;
+    const bracket = amount < 200 ? "0-199.99" : "200-349.99";
+    const avantajli = BAREM_ALTI_AVANTAJLI[bracket].map((p, i) => ({
+      label: BAREM_COMPANIES[i],
+      price: p * vatMultiplier,
+    }));
+    const standart = BAREM_ALTI_STANDART[bracket].map((p, i) => ({
+      label: BAREM_COMPANIES[i],
+      price: p * vatMultiplier,
+    }));
+    return { bracket, avantajli, standart };
+  }, [orderAmount, includeVat]);
+
   return (
     <div className="space-y-6">
       <Card>
@@ -234,7 +269,7 @@ export function CargoPriceCalculator() {
             Kargo Fiyatı Hesaplayıcı
           </CardTitle>
           <p className="text-sm text-muted-foreground">
-            22 Mayıs 2026 geçerli Trendyol anlaşmalı kargo fiyatları (KDV dahil)
+            10 Ağustos 2026 geçerli Trendyol anlaşmalı kargo fiyatları (KDV dahil)
           </p>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -268,6 +303,21 @@ export function CargoPriceCalculator() {
             </div>
             <p className="text-xs text-muted-foreground mt-2">
               Desi = (En × Boy × Yükseklik) ÷ 3000 — kargo, desi ile ağırlıktan büyük olanı alır.
+            </p>
+          </div>
+
+          {/* Sipariş Tutarı (Barem Altı için) */}
+          <div>
+            <p className="text-sm font-semibold mb-3">Sipariş Tutarı (Barem Altı Hesabı İçin)</p>
+            <div className="flex items-center gap-3 max-w-xs">
+              <div className="flex-1">
+                <Label htmlFor="order-amount">Sipariş Tutarı (TL)</Label>
+                <Input id="order-amount" type="number" min="0" step="0.01" placeholder="150.00" value={orderAmount}
+                  onChange={(e) => setOrderAmount(e.target.value)} />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              0–349,99 TL arası siparişler için barem altı fiyatlar uygulanır. 350 TL ve üzeri desi fiyatlarına tabidir.
             </p>
           </div>
 
@@ -349,6 +399,82 @@ export function CargoPriceCalculator() {
               <p>• 100 desi ve üzeri gönderilerde lojistik firmalar hariç ağır kargo ek bedeli uygulanır.</p>
               <p>• Başarısız teslimat ve iade bedelleri ayrıca faturalandırılır.</p>
               <p>• Barem altı uygulamalarında bu fiyatlar değil, barem altı fiyatları geçerlidir.</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Barem Altı Fiyat Tablosu */}
+      {baremAlti && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Truck className="w-4 h-4" />
+              Barem Altı Kargo Fiyatları
+              <span className="text-sm font-normal text-muted-foreground ml-1">
+                ({baremAlti.bracket === "0-199.99" ? "0–199,99 TL" : "200–349,99 TL"} sipariş, KDV dahil %20)
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {/* Avantajlı */}
+            <div>
+              <p className="text-sm font-semibold mb-2 text-green-700 dark:text-green-400">
+                ✓ Avantajlı Barem (1 günlük termin veya Hızlı Teslimat/Bugün Kargoda etiketiyle başarılı teslimat)
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {baremAlti.avantajli.map((item) => {
+                  const isMin = item.price === Math.min(...baremAlti.avantajli.map((x) => x.price));
+                  return (
+                    <div key={item.label}
+                      className={`flex items-center justify-between rounded-lg px-4 py-2 border
+                        ${isMin ? "border-green-400 bg-green-50 dark:bg-green-950/30" : "border-border bg-card"}`}
+                    >
+                      <span className={`text-sm font-medium ${isMin ? "text-green-800 dark:text-green-200" : ""}`}>
+                        {isMin && <span className="mr-1">✓</span>}{item.label}
+                        {isMin && <Badge className="text-xs bg-green-500 hover:bg-green-600 text-white ml-2">En Ucuz</Badge>}
+                      </span>
+                      <span className={`font-bold text-sm ${isMin ? "text-green-700 dark:text-green-300" : ""}`}>
+                        ₺{item.price.toFixed(2)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Standart */}
+            <div>
+              <p className="text-sm font-semibold mb-2 text-muted-foreground">
+                Standart Barem (1 günden fazla termin veya etikete rağmen erken teslimat yapılmayan)
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {baremAlti.standart.map((item) => {
+                  const isMin = item.price === Math.min(...baremAlti.standart.map((x) => x.price));
+                  return (
+                    <div key={item.label}
+                      className={`flex items-center justify-between rounded-lg px-4 py-2 border
+                        ${isMin ? "border-blue-400 bg-blue-50 dark:bg-blue-950/30" : "border-border bg-card"}`}
+                    >
+                      <span className={`text-sm font-medium ${isMin ? "text-blue-800 dark:text-blue-200" : ""}`}>
+                        {isMin && <span className="mr-1">✓</span>}{item.label}
+                        {isMin && <Badge className="text-xs bg-blue-500 hover:bg-blue-600 text-white ml-2">En Ucuz</Badge>}
+                      </span>
+                      <span className={`font-bold text-sm ${isMin ? "text-blue-700 dark:text-blue-300" : ""}`}>
+                        ₺{item.price.toFixed(2)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-800 dark:text-amber-200 space-y-1">
+              <p className="font-semibold">Notlar:</p>
+              <p>• Barem altı fiyatlar 10 Ağustos 2026 itibarıyla geçerlidir.</p>
+              <p>• Yalnızca Aras, DHL, Kolay Gelsin, PTT, Sürat, TEX ve YK firmalarına uygulanır.</p>
+              <p>• CEVA Tedarik, CEVA ve Horoz barem altı uygulamasına dahil edilmez; desi fiyatları geçerlidir.</p>
+              <p>• 10 desi üzeri gönderilerde barem altı uygulanmaz; desi bazlı fiyatlar geçerlidir.</p>
             </div>
           </CardContent>
         </Card>

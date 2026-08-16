@@ -1,6 +1,6 @@
 /**
  * Trendyol Kargo Servisi
- * İş kuralları: 26 Mart 2026 Barem Destek + 22 Mayıs 2026 Standart Kargo Tablosu
+ * İş kuralları: 10 Ağustos 2026 Barem Destek + 10 Ağustos 2026 Standart Kargo Tablosu
  */
 
 // ─── VERİ MODELLERİ ──────────────────────────────────────────────────────────
@@ -44,45 +44,48 @@ export interface OptimizationSuggestion {
 
 // ─── BAREM DESTEK FİYATLARI (KDV HARİÇ, TL) ────────────────────────────────
 // Geçerlilik: satisFiyati < 350 VE desi < 10
+// Güncelleme: 10 Ağustos 2026
 
 const BAREM_PRICES: Record<
   CargoTable,
   Record<BaremBand, Record<CargoCompany, number>>
 > = {
   1: {
+    // Avantajlı: 1 günlük termin VE/VEYA Hızlı Teslimat/Bugün Kargoda etiketine göre başarılı teslimat
     under200: {
-      "TEX/PTT":    34.16,
-      "Aras":       42.91,
-      "Sürat":      48.74,
-      "KolayGelsin":51.24,
-      "DHL":        52.08,
-      "Yurtiçi":    74.58,
+      "TEX/PTT":     38.74,
+      "Aras":        48.33,
+      "Sürat":       54.58,
+      "KolayGelsin": 55.83,
+      "DHL":         57.08,
+      "Yurtiçi":     83.33,
     },
     "200to350": {
-      "TEX/PTT":    65.83,
-      "Aras":       73.74,
-      "Sürat":      79.58,
-      "KolayGelsin":82.08,
-      "DHL":        82.91,
-      "Yurtiçi":   104.58,
+      "TEX/PTT":     70.41,
+      "Aras":        79.16,
+      "Sürat":       85.41,
+      "KolayGelsin": 86.66,
+      "DHL":         87.91,
+      "Yurtiçi":    113.33,
     },
   },
   2: {
+    // Standart: 1 günden fazla termin veya etikete rağmen erken teslimat yapılmayan
     under200: {
-      "TEX/PTT":    64.58,
-      "Aras":       71.66,
-      "Sürat":      77.49,
-      "KolayGelsin":79.58,
-      "DHL":        80.83,
-      "Yurtiçi":   101.24,
+      "TEX/PTT":     73.33,
+      "Aras":        80.83,
+      "Sürat":       87.08,
+      "KolayGelsin": 88.33,
+      "DHL":         89.58,
+      "Yurtiçi":    114.16,
     },
     "200to350": {
-      "TEX/PTT":    72.91,
-      "Aras":       79.99,
-      "Sürat":      85.83,
-      "KolayGelsin":87.91,
-      "DHL":        89.16,
-      "Yurtiçi":   109.58,
+      "TEX/PTT":     78.74,
+      "Aras":        86.24,
+      "Sürat":       92.49,
+      "KolayGelsin": 93.74,
+      "DHL":         94.99,
+      "Yurtiçi":    119.16,
     },
   },
 };

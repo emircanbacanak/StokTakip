@@ -1,14 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { Store, Truck, PackagePlus, FileSpreadsheet, ListChecks } from "lucide-react";
+import { Store, Truck, PackagePlus, FileSpreadsheet, ListChecks, ShoppingBag } from "lucide-react";
 import { TrendyolCalculatorClient } from "./trendyol-calculator-client";
 import { CargoPriceCalculator } from "./cargo-price-calculator";
 import { ProductForm } from "./product-form";
 import { ExcelUpload } from "./excel-upload";
 import { TrendyolListingsClient } from "./trendyol-listings-client";
+import { TrendyolOrdersSync } from "./trendyol-orders-sync";
 
 const TABS = [
+  { id: "orders", label: "Siparişler", icon: ShoppingBag },
   { id: "calculator", label: "Fiyat Hesaplayıcı", icon: Store },
   { id: "cargo", label: "Kargo Fiyatları", icon: Truck },
   { id: "add_product", label: "Ürün Ekle", icon: PackagePlus },
@@ -17,7 +19,7 @@ const TABS = [
 ];
 
 export function TrendyolTabs() {
-  const [activeTab, setActiveTab] = useState("calculator");
+  const [activeTab, setActiveTab] = useState("orders");
 
   return (
     <div className="flex-1 overflow-auto">
@@ -48,6 +50,11 @@ export function TrendyolTabs() {
       </div>
 
       {/* Tab Content */}
+      {activeTab === "orders" && (
+        <div className="container mx-auto p-4 lg:p-6 pb-24 lg:pb-6 max-w-5xl">
+          <TrendyolOrdersSync />
+        </div>
+      )}
       {activeTab === "calculator" && <TrendyolCalculatorClient />}
       {activeTab === "cargo" && (
         <div className="container mx-auto p-4 lg:p-6 pb-24 lg:pb-6 max-w-7xl">

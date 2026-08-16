@@ -139,20 +139,6 @@ export function TrendyolListingsClient() {
         </div>
         <ProductForm
           listingId={selectedListing.id}
-          initialValues={{
-            title: selectedListing.title,
-            description: selectedListing.description,
-            brand_name: selectedListing.brand_name,
-            list_price: String(selectedListing.list_price),
-            sale_price: String(selectedListing.sale_price),
-            vat_rate: selectedListing.vat_rate,
-            quantity: String(selectedListing.quantity),
-            image_urls: selectedListing.image_urls,
-            cargo_company: selectedListing.cargo_company ?? "TEX/PTT",
-            desi: selectedListing.desi ? String(selectedListing.desi) : "",
-            warranty_months: String(selectedListing.warranty_months),
-            category_id: selectedListing.category_id ?? "",
-          }}
           onSuccess={() => { setEditMode(false); setSelectedListing(null); loadListings(); }}
         />
       </div>
