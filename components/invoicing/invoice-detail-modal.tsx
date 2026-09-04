@@ -3,7 +3,7 @@
 import { X, Copy, CheckCircle2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, cleanProductName } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
 interface InvoiceDetailModalProps {
@@ -361,9 +361,9 @@ export function InvoiceDetailModal({ orderId, onClose }: InvoiceDetailModalProps
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-lg">{item.product_name}</span>
+                          <span className="font-medium text-lg">{cleanProductName(item.product_name)}</span>
                           <button
-                            onClick={() => copyToClipboard(item.product_name, `product-${idx}`)}
+                            onClick={() => copyToClipboard(cleanProductName(item.product_name), `product-${idx}`)}
                             className="p-1 hover:bg-muted rounded transition-colors"
                           >
                             {copied === `product-${idx}` ? (
@@ -464,10 +464,32 @@ export function InvoiceDetailModal({ orderId, onClose }: InvoiceDetailModalProps
         </div>
 
         {/* Footer */}
-        <div className="p-6 border-t border-border">
+        <div className="p-6 border-t border-border flex gap-3">
+          <button
+            onClick={async () => {
+              try {
+                const sb = createClient();
+                await sb
+                  .from("trendyol_orders")
+                  .update({
+                    invoice_status: "Invoiced",
+                    invoiced: true,
+                    invoiced_at: new Date().toISOString(),
+                  })
+                  .eq("id", orderId);
+                toast({ title: "✅ Fatura kesildi olarak işaretlendi" });
+                onClose();
+              } catch {
+                toast({ title: "Hata", description: "İşaretlenemedi", variant: "destructive" });
+              }
+            }}
+            className="flex-1 bg-gradient-to-r from-emerald-500 to-green-600 text-white font-semibold py-3 rounded-xl hover:shadow-lg transition-all"
+          >
+            ✅ Fatura Kesildi
+          </button>
           <button
             onClick={onClose}
-            className="w-full bg-gradient-to-r from-blue-500 to-violet-600 text-white font-semibold py-3 rounded-xl hover:shadow-lg transition-all"
+            className="flex-1 bg-muted text-foreground font-semibold py-3 rounded-xl hover:bg-muted/80 transition-all"
           >
             Kapat
           </button>

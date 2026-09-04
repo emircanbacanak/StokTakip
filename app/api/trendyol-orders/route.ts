@@ -67,18 +67,22 @@ export async function GET(request: NextRequest) {
     if (status) queryParams.append("status", status);
     if (orderNumber) queryParams.append("orderNumber", orderNumber);
 
-    const apiUrl = `${TRENDYOL_BASE_URL}/${credentials.sellerId}/orders?${queryParams.toString()}`;
+    const headers = {
+      Authorization: getBasicAuthHeader(credentials.apiKey, credentials.apiSecret),
+      "Content-Type": "application/json",
+      "User-Agent": `${credentials.sellerId} - SelfIntegration`,
+    };
 
-    console.log("🔍 Fetching Trendyol orders:", apiUrl);
+    const v2Url = `https://apigw.trendyol.com/integration/order/sellers/${credentials.sellerId}/orders?${queryParams.toString()}`;
+    const legacyUrl = `https://api.trendyol.com/sapigw/suppliers/${credentials.sellerId}/orders?${queryParams.toString()}`;
 
-    const response = await fetch(apiUrl, {
-      method: "GET",
-      headers: {
-        "Authorization": getBasicAuthHeader(credentials.apiKey, credentials.apiSecret),
-        "Content-Type": "application/json",
-        "User-Agent": "TrendyolSupplierAPI/1.0",
-      },
-    });
+    console.log("🔍 Fetching Trendyol orders:", v2Url);
+
+    let response = await fetch(v2Url, { method: "GET", headers });
+    if (!response.ok) {
+      console.log(`⚠️ v2 ${response.status}, legacy fallback deneniyor...`);
+      response = await fetch(legacyUrl, { method: "GET", headers });
+    }
 
     if (!response.ok) {
       const errorText = await response.text();

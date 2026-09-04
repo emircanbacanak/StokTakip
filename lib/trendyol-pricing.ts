@@ -48,13 +48,6 @@ function gramsToDesi(grams: number): number {
   return Math.max(1, Math.ceil(grams / 1000));
 }
 
-function calcProductionCost(weightGrams: number, settings: TrendyolPricingSettings): number {
-  const wasted = weightGrams * (1 + settings.wastePercentage / 100);
-  return (wasted / 1000) * settings.filamentPricePerKg
-    + wasted * settings.electricityCostPerGram
-    + wasted * settings.depreciationCostPerGram;
-}
-
 export interface TrendyolPricingResult {
   recommendedPrice: number;
   targetPrice: number;
@@ -62,101 +55,111 @@ export interface TrendyolPricingResult {
   breakEvenPrice: number;
 }
 
+/**
+ * Belirli bir kargo maliyeti için kesin matematiksel fiyatı hesaplar.
+ * Formül: P = (BaseCost - FixedVatInputs) / [ (5/6)*(1 - totalCutRate) - m ]
+ */
+function calcPriceForShipping(
+  shipping: number,
+  productionCost: number,
+  weightGrams: number,
+  settings: TrendyolPricingSettings,
+  targetMargin: number
+): number {
+  const platformFee = settings.platformFeeBase * 1.20; // KDV hariç girildiği için * 1.20 ile KDV dahil tutar bulunur
+  const packagingCost = settings.packagingCost;
+  const fixedCost = settings.fixedCostPerOrder;
+  const returnCost = (productionCost + shipping + packagingCost) * (settings.returnRate / 100);
+  const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
+
+  const adRate = settings.organicSalesMode ? 0 : settings.advertisingRate / 100;
+  const totalCutRate = (settings.commissionRate + settings.paymentTermFee) / 100 + adRate;
+
+  const wastedGrams = weightGrams * (1 + settings.wastePercentage / 100);
+  const filamentCost = (wastedGrams / 1000) * settings.filamentPricePerKg;
+  const electricityCost = wastedGrams * settings.electricityCostPerGram;
+
+  const VAT_RATE = 0.20;
+  const fixedVatInputs = (shipping + platformFee + filamentCost + electricityCost + packagingCost) * VAT_RATE / (1 + VAT_RATE);
+
+  const denominator = (5 / 6) * (1 - totalCutRate) - targetMargin;
+  if (denominator <= 0) return Infinity;
+
+  return (baseCost - fixedVatInputs) / denominator;
+}
+
 export function calcTrendyolPrice(
   productionCost: number,
   weightGrams: number,
   settings: TrendyolPricingSettings
 ): TrendyolPricingResult {
-  const platformFee = settings.platformFeeBase * 1.20;
-  const packagingCost = settings.packagingCost;
-  const fixedCost = settings.fixedCostPerOrder;
-  const adRate = settings.organicSalesMode ? 0 : settings.advertisingRate / 100;
-  const cutRateOnGross = (settings.commissionRate + settings.paymentTermFee) / 100; // brüt fiyat üzerinden
-  const totalCutRate = cutRateOnGross + adRate;
-  const m = settings.profitMargin / 100; // fiyat üzerinden hedef kâr oranı
-  const denominator = 1 - totalCutRate - m;
   const desi = gramsToDesi(weightGrams);
+  const m = settings.profitMargin / 100;
 
+  // 1) Barem Altı (< 200 TL) Hedef ve Başabaş Fiyatı
   let priceUnder200 = Infinity;
+  let breakEvenUnder200 = Infinity;
   if (desi < 10) {
-    const shipping = calcShippingCost(weightGrams, 199, settings.fastShipping);
-    const returnCost = (productionCost + shipping + packagingCost) * (settings.returnRate / 100);
-    const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
-    const computed = baseCost / denominator;
-    if (computed <= 199) priceUnder200 = computed;
+    const shippingUnder200 = calcShippingCost(weightGrams, 199, settings.fastShipping);
+    const p1 = calcPriceForShipping(shippingUnder200, productionCost, weightGrams, settings, m);
+    if (p1 <= 199) priceUnder200 = p1;
+    const be1 = calcPriceForShipping(shippingUnder200, productionCost, weightGrams, settings, 0);
+    if (be1 <= 199) breakEvenUnder200 = be1;
   }
 
-  let priceOver200 = 200;
-  for (let i = 0; i < 20; i += 1) {
-    const shipping = calcShippingCost(weightGrams, priceOver200, settings.fastShipping);
-    const returnCost = (productionCost + shipping + packagingCost) * (settings.returnRate / 100);
-    const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
-    const nextPrice = baseCost / denominator;
-    if (Math.abs(nextPrice - priceOver200) < 0.5) {
-      priceOver200 = nextPrice;
-      break;
+  // 2) Barem Üstü (200-349 TL) Hedef ve Başabaş Fiyatı
+  let price200to350 = Infinity;
+  let breakEven200to350 = Infinity;
+  if (desi < 10) {
+    const shipping200to350 = calcShippingCost(weightGrams, 250, settings.fastShipping);
+    const p2 = calcPriceForShipping(shipping200to350, productionCost, weightGrams, settings, m);
+    if (p2 >= 200 && p2 < 350) price200to350 = p2;
+    const be2 = calcPriceForShipping(shipping200to350, productionCost, weightGrams, settings, 0);
+    if (be2 >= 200 && be2 < 350) breakEven200to350 = be2;
+  }
+
+  // 3) Standart Kargo (>= 350 TL veya desi >= 10)
+  const shippingStandart = calcShippingCost(weightGrams, 350, settings.fastShipping);
+  const p3 = calcPriceForShipping(shippingStandart, productionCost, weightGrams, settings, m);
+  const be3 = calcPriceForShipping(shippingStandart, productionCost, weightGrams, settings, 0);
+
+  // En uygun hedef fiyat seçimi
+  let exactTargetPrice = p3;
+  if (isFinite(priceUnder200)) {
+    exactTargetPrice = priceUnder200;
+  } else if (isFinite(price200to350)) {
+    exactTargetPrice = price200to350;
+  }
+
+  let breakEvenPriceVal = be3;
+  if (isFinite(breakEvenUnder200)) {
+    breakEvenPriceVal = breakEvenUnder200;
+  } else if (isFinite(breakEven200to350)) {
+    breakEvenPriceVal = breakEven200to350;
+  }
+
+  let targetPriceRounded = Math.ceil(exactTargetPrice);
+  let recommendedPrice = targetPriceRounded;
+
+  // Barem Optimizasyonu: 199 TL tavanı önerisi
+  if (desi < 10 && targetPriceRounded > 199) {
+    const bd199 = calcTrendyolBreakdownAtPrice(199, productionCost, weightGrams, settings);
+    const bdTarget = calcTrendyolBreakdownAtPrice(targetPriceRounded, productionCost, weightGrams, settings);
+    if (bd199.netProfitAfterVat > bdTarget.netProfitAfterVat) {
+      recommendedPrice = 199;
     }
-    priceOver200 = nextPrice;
-  }
-
-  const price = priceUnder200 <= priceOver200 ? priceUnder200 : priceOver200;
-  let roundedPrice = Math.ceil(price);
-
-  for (let i = 0; i < 40; i += 1) {
-    const shipping = calcShippingCost(weightGrams, roundedPrice, settings.fastShipping);
-    const returnCost = (productionCost + shipping + packagingCost) * (settings.returnRate / 100);
-    const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
-    const totalExpenses = baseCost + roundedPrice * cutRateOnGross + roundedPrice * adRate;
-    const margin = roundedPrice > 0 ? (roundedPrice - totalExpenses) / roundedPrice : 0;
-    if (margin >= m - 0.001) break; // hedef marja ulaştık
-    roundedPrice += 1;
-  }
-
-  if (desi < 10 && roundedPrice > 199) {
-    const shipping199 = calcShippingCost(weightGrams, 199, settings.fastShipping);
-    const returnCost199 = (productionCost + shipping199 + packagingCost) * (settings.returnRate / 100);
-    const base199 = productionCost + shipping199 + packagingCost + platformFee + fixedCost + returnCost199;
-    const total199 = base199 + 199 * cutRateOnGross + 199 * adRate;
-    const profit199 = 199 - total199;
-    const margin199 = 199 > 0 ? profit199 / 199 : 0;
-
-    if (margin199 >= m) {
-      roundedPrice = 199;
-    } else {
-      const shippingRounded = calcShippingCost(weightGrams, roundedPrice, settings.fastShipping);
-      const returnCostRounded = (productionCost + shippingRounded + packagingCost) * (settings.returnRate / 100);
-      const baseRounded = productionCost + shippingRounded + packagingCost + platformFee + fixedCost + returnCostRounded;
-      const totalRounded = baseRounded + roundedPrice * cutRateOnGross + roundedPrice * adRate;
-      const profitRounded = roundedPrice - totalRounded;
-      if (profit199 > profitRounded) {
-        roundedPrice = 199;
-      }
-    }
-  }
-
-  let breakEven = 150;
-  for (let i = 0; i < 20; i += 1) {
-    const shipping = calcShippingCost(weightGrams, breakEven, settings.fastShipping);
-    const returnCost = (productionCost + shipping + packagingCost) * (settings.returnRate / 100);
-    const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
-    const nextBe = baseCost / (1 - totalCutRate);
-    if (Math.abs(nextBe - breakEven) < 0.5) {
-      breakEven = nextBe;
-      break;
-    }
-    breakEven = nextBe;
   }
 
   return {
-    recommendedPrice: roundedPrice,
-    targetPrice: Math.ceil(price),
-    exactTargetPrice: price,
-    breakEvenPrice: Math.ceil(breakEven),
+    recommendedPrice,
+    targetPrice: targetPriceRounded,
+    exactTargetPrice,
+    breakEvenPrice: Math.ceil(breakEvenPriceVal),
   };
 }
 
 /**
- * Verilen sabit satış fiyatı için Trendyol'a özgü maliyet dökümünü hesaplar.
+ * Verilen sabit satış fiyatı için Trendyol'a özgü detaylı maliyet ve KDV dökümünü hesaplar.
  */
 export function calcTrendyolBreakdownAtPrice(
   price: number,
@@ -176,8 +179,22 @@ export function calcTrendyolBreakdownAtPrice(
   totalExpenses: number;
   netProfit: number;
   netMarginOnPrice: number;
+  // KDV Hesabı (KDV Mükellefi)
+  vatCollected: number;
+  vatPaidOnInputs: number;
+  vatPaidShipping: number;
+  vatPaidPlatform: number;
+  vatPaidCommission: number;
+  vatPaidPaymentTerm: number;
+  vatPaidAdvertising: number;
+  vatPaidFilament: number;
+  vatPaidElectricity: number;
+  vatPaidPackaging: number;
+  vatPayable: number;
+  netProfitAfterVat: number;
+  netMarginAfterVat: number;
 } {
-  const platformFee = settings.platformFeeBase * 1.20;
+  const platformFee = settings.platformFeeBase * 1.20; // KDV hariç girildiği için * 1.20 ile KDV dahil tutar bulunur
   const packagingCost = settings.packagingCost;
   const fixedCost = settings.fixedCostPerOrder;
   const adRate = settings.organicSalesMode ? 0 : settings.advertisingRate / 100;
@@ -194,6 +211,37 @@ export function calcTrendyolBreakdownAtPrice(
   const netProfit = price - totalExpenses;
   const netMarginOnPrice = price > 0 ? (netProfit / price) * 100 : 0;
 
+  // KDV hesabı (%20 KDV)
+  const wastedGrams = weightGrams * (1 + settings.wastePercentage / 100);
+  const filamentCost = (wastedGrams / 1000) * settings.filamentPricePerKg;
+  const electricityCost = wastedGrams * settings.electricityCostPerGram;
+
+  const VAT_RATE = 0.20;
+  const vatCollected = (price * VAT_RATE) / (1 + VAT_RATE);
+
+  const vatPaidShipping = (shipping * VAT_RATE) / (1 + VAT_RATE);
+  const vatPaidPlatform = (platformFee * VAT_RATE) / (1 + VAT_RATE);
+  const vatPaidCommission = (commission * VAT_RATE) / (1 + VAT_RATE);
+  const vatPaidPaymentTerm = (paymentTermFee * VAT_RATE) / (1 + VAT_RATE);
+  const vatPaidAdvertising = (advertisingCost * VAT_RATE) / (1 + VAT_RATE);
+  const vatPaidFilament = (filamentCost * VAT_RATE) / (1 + VAT_RATE);
+  const vatPaidElectricity = (electricityCost * VAT_RATE) / (1 + VAT_RATE);
+  const vatPaidPackaging = (packagingCost * VAT_RATE) / (1 + VAT_RATE);
+
+  const vatPaidOnInputs =
+    vatPaidShipping +
+    vatPaidPlatform +
+    vatPaidCommission +
+    vatPaidPaymentTerm +
+    vatPaidAdvertising +
+    vatPaidFilament +
+    vatPaidElectricity +
+    vatPaidPackaging;
+
+  const vatPayable = Math.max(0, vatCollected - vatPaidOnInputs);
+  const netProfitAfterVat = netProfit - vatPayable;
+  const netMarginAfterVat = price > 0 ? (netProfitAfterVat / price) * 100 : 0;
+
   return {
     shipping,
     packagingCost,
@@ -207,5 +255,19 @@ export function calcTrendyolBreakdownAtPrice(
     totalExpenses,
     netProfit,
     netMarginOnPrice,
+    vatCollected,
+    vatPaidOnInputs,
+    vatPaidShipping,
+    vatPaidPlatform,
+    vatPaidCommission,
+    vatPaidPaymentTerm,
+    vatPaidAdvertising,
+    vatPaidFilament,
+    vatPaidElectricity,
+    vatPaidPackaging,
+    vatPayable,
+    netProfitAfterVat,
+    netMarginAfterVat,
   };
 }
+

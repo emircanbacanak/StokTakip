@@ -82,6 +82,11 @@ Bu steering file, her oturumda otomatik olarak yüklenir ve token kullanımını
 - `app/dashboard/production/page.tsx` - Üretim takibi
 - `app/dashboard/buyers/page.tsx` - Alıcı yönetimi
 
+### Trendyol Fiyat Hesaplayıcısı
+- `BAREM_DESTEK_FIYATLARI.md` - Barem destek fiyatları rehberi (#BAREM_DESTEK_FIYATLARI.md)
+- `lib/trendyol-cargo.ts` - Kargo fiyatlandırması
+- `components/trendyol/trendyol-calculator-client.tsx` - Ana hesaplama motoru
+
 ## Yeni Özellik Geliştirme Akışı
 
 1. **Spec Oluştur** - `.kiro/specs/` klasöründe

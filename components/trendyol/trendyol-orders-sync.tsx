@@ -9,6 +9,7 @@ interface SyncResult {
   fetched: number;
   created: number;
   updated: number;
+  deleted: number;
   errors: number;
   errorMessage?: string;
 }
@@ -18,49 +19,47 @@ export function TrendyolOrdersSync() {
   const [lastSync, setLastSync] = useState<SyncResult | null>(null);
   const { toast } = useToast();
 
-  const syncOrders = async (days: number = 7) => {
+  const syncOrders = async (days: number = 30) => {
     setSyncing(true);
+    setLastSync(null);
     
     try {
-      const endDate = Date.now();
-      const startDate = endDate - (days * 24 * 60 * 60 * 1000);
-
       toast({
-        title: "Senkronizasyon başladı",
-        description: `Son ${days} günün siparişleri çekiliyor...`,
+        title: "Senkronizasyon Başladı",
+        description: `Eski veriler temizleniyor ve son ${days} günün siparişleri Trendyol'dan çekiliyor...`,
       });
 
       const response = await fetch("/api/trendyol-orders/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ startDate, endDate }),
+        body: JSON.stringify({ days }),
       });
 
+      const result = await response.json();
+
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Senkronizasyon başarısız");
+        throw new Error(result.error || result.details || "Senkronizasyon başarısız oldu");
       }
 
-      const result: SyncResult = await response.json();
       setLastSync(result);
 
       if (result.success) {
         toast({
-          title: "✅ Senkronizasyon tamamlandı!",
-          description: `${result.created} yeni, ${result.updated} güncellenen sipariş`,
+          title: "✅ Senkronizasyon Tamamlandı!",
+          description: `${result.fetched} sipariş çekildi, ${result.created} sipariş veritabanına kaydedildi.`,
         });
       } else {
         toast({
-          title: "⚠️ Senkronizasyon tamamlandı (hatalarla)",
-          description: result.errorMessage || `${result.errors} hata oluştu`,
+          title: "⚠️ Senkronizasyon Tamamlandı (Hatalarla)",
+          description: `${result.created} sipariş kaydedildi, ${result.errors} hata oluştu.`,
           variant: "destructive",
         });
       }
     } catch (error) {
       console.error("Sync error:", error);
       toast({
-        title: "Hata",
-        description: error instanceof Error ? error.message : "Bilinmeyen hata",
+        title: "Senkronizasyon Hatası",
+        description: error instanceof Error ? error.message : "Bilinmeyen hata oluştu",
         variant: "destructive",
       });
     } finally {
@@ -171,7 +170,7 @@ export function TrendyolOrdersSync() {
               <p className="font-semibold text-foreground mb-2">
                 Son Senkronizasyon Sonucu
               </p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                 <div>
                   <p className="text-muted-foreground">Toplam</p>
                   <p className="font-bold text-foreground">{lastSync.fetched}</p>
@@ -183,6 +182,10 @@ export function TrendyolOrdersSync() {
                 <div>
                   <p className="text-muted-foreground">Güncellenen</p>
                   <p className="font-bold text-blue-600">{lastSync.updated}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Silinen</p>
+                  <p className="font-bold text-orange-600">{lastSync.deleted}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Hata</p>
