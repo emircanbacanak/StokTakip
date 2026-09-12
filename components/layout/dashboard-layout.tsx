@@ -6,9 +6,15 @@ interface DashboardLayoutProps {
   children: React.ReactNode;
   title: string;
   subtitle?: string;
+  maxWidth?: string;
 }
 
-export function DashboardLayout({ children, title, subtitle }: DashboardLayoutProps) {
+export function DashboardLayout({
+  children,
+  title,
+  subtitle,
+  maxWidth = "max-w-[1720px]",
+}: DashboardLayoutProps) {
   return (
     <>
       <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-4 py-3 lg:px-6">
@@ -22,7 +28,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
           </div>
         </div>
       </header>
-      <main className="flex-1 p-4 pb-28 lg:p-6 lg:pb-6 max-w-5xl w-full mx-auto">
+      <main className={`flex-1 p-4 pb-28 lg:p-6 lg:pb-6 ${maxWidth} w-full mx-auto`}>
         {children}
       </main>
     </>

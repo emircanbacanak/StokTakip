@@ -6,7 +6,6 @@
  * • xlsx kütüphanesi ile Excel parse
  * • Rate-limit koruması (800ms varsayılan gecikme)
  * • Satır bazlı ilerleme takibi
- * • "Toptan sipariş vermeyin." öneki otomatik eklenir
  * • Hata satırları kırmızı, başarı satırları yeşil gösterilir
  */
 
@@ -107,8 +106,8 @@ export function ExcelUpload() {
 
     const parsed: RowResult[] = data.map((row, i) => {
       // Görsel URL'leri — image_url_1..8 veya image_urls sütunları
-      const imageKeys = ["image_url_1","image_url_2","image_url_3","image_url_4",
-                         "image_url_5","image_url_6","image_url_7","image_url_8"];
+      const imageKeys = ["image_url_1", "image_url_2", "image_url_3", "image_url_4",
+        "image_url_5", "image_url_6", "image_url_7", "image_url_8"];
       const image_urls = [
         ...imageKeys.map((k) => getField(row, k)).filter(Boolean),
         ...getField(row, "image_urls").split(";").map((u) => u.trim()).filter(Boolean),
@@ -119,18 +118,18 @@ export function ExcelUpload() {
 
       return {
         rowIndex: i + 2, // Excel satır numarası (1 = header)
-        title:           getField(row, "title", "baslik", "başlık", "Başlık", "ürün adı", "urun_adi"),
+        title: getField(row, "title", "baslik", "başlık", "Başlık", "ürün adı", "urun_adi"),
         description,
-        brand_name:      getField(row, "brand_name", "marka", "Marka") || "Yok",
-        list_price:      getNumField(row, "list_price", "liste_fiyati", "Liste Fiyatı"),
-        sale_price:      getNumField(row, "sale_price", "satis_fiyati", "Satış Fiyatı"),
-        vat_rate:        getNumField(row, "vat_rate", "kdv", "KDV") || 10,
-        quantity:        Math.max(1, getNumField(row, "quantity", "stok", "Stok", "adet")),
+        brand_name: getField(row, "brand_name", "marka", "Marka") || "Yok",
+        list_price: getNumField(row, "list_price", "liste_fiyati", "Liste Fiyatı"),
+        sale_price: getNumField(row, "sale_price", "satis_fiyati", "Satış Fiyatı"),
+        vat_rate: getNumField(row, "vat_rate", "kdv", "KDV") || 10,
+        quantity: Math.max(1, getNumField(row, "quantity", "stok", "Stok", "adet")),
         image_urls,
-        cargo_company:   getField(row, "cargo_company", "kargo", "Kargo") || "TEX/PTT",
-        desi:            getNumField(row, "desi", "Desi") || 1,
+        cargo_company: getField(row, "cargo_company", "kargo", "Kargo") || "TEX/PTT",
+        desi: getNumField(row, "desi", "Desi") || 1,
         warranty_months: getNumField(row, "warranty_months", "garanti", "Garanti"),
-        status:          "pending" as const,
+        status: "pending" as const,
       };
     });
 
@@ -230,11 +229,10 @@ export function ExcelUpload() {
 
       {/* Drag-drop alanı */}
       <div
-        className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors cursor-pointer ${
-          dragOver
-            ? "border-orange-500 bg-orange-50/50 dark:bg-orange-950/20"
-            : "border-border hover:border-orange-400"
-        }`}
+        className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors cursor-pointer ${dragOver
+          ? "border-orange-500 bg-orange-50/50 dark:bg-orange-950/20"
+          : "border-border hover:border-orange-400"
+          }`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => {
@@ -322,15 +320,14 @@ export function ExcelUpload() {
             {rows.map((row, idx) => (
               <div
                 key={idx}
-                className={`flex items-center gap-3 p-3 rounded-lg border text-sm transition-colors ${
-                  row.status === "success"
-                    ? "bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-800"
-                    : row.status === "error"
+                className={`flex items-center gap-3 p-3 rounded-lg border text-sm transition-colors ${row.status === "success"
+                  ? "bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-800"
+                  : row.status === "error"
                     ? "bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800"
                     : row.status === "uploading"
-                    ? "bg-orange-50 border-orange-200 dark:bg-orange-950/20 dark:border-orange-800"
-                    : "bg-muted/30 border-border"
-                }`}
+                      ? "bg-orange-50 border-orange-200 dark:bg-orange-950/20 dark:border-orange-800"
+                      : "bg-muted/30 border-border"
+                  }`}
               >
                 {/* Durum ikonu */}
                 <div className="shrink-0">

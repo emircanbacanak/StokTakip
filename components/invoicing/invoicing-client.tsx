@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { FileText, Calendar, User, Package, AlertCircle, Trash2, Zap } from "lucide-react";
+import { FileText, Calendar, User, Package, AlertCircle, Trash2, Zap, Download, RefreshCw, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate, cleanProductName } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useConfirm } from "@/hooks/use-confirm";
 import { InvoiceDetailModal } from "./invoice-detail-modal";
 import { GibEarsivModal } from "./gib-earsiv-modal";
 import type { Order, OrderItem, Buyer } from "@/lib/types/database";
@@ -22,10 +23,22 @@ export function InvoicingClient() {
   const [orders, setOrders] = useState<OrderWithInvoiceStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<{
+    success: boolean;
+    fetched: number;
+    created: number;
+    delivered?: number;
+    notInvoiced?: number;
+    updated?: number;
+    deleted?: number;
+    errors: number;
+    errorMessage?: string;
+  } | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [showGibModal, setShowGibModal] = useState(false);
   const { toast } = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
     try {
@@ -179,12 +192,13 @@ export function InvoicingClient() {
     }
   }, [toast, showAll]);
 
-  const handleSync = async (days: number) => {
+  const handleSync = async (days: number = 30) => {
     setSyncing(true);
+    setLastSync(null);
     setOrders([]); // Önbelleği / ekranı sıfırla
     toast({
-      title: "🔄 Senkronizasyon Başladı",
-      description: `Eski veritabanı kayıtları temizleniyor ve son ${days} günün verileri Trendyol'dan çekiliyor...`,
+      title: "Senkronizasyon Başladı",
+      description: `Eski veriler temizleniyor ve son ${days} günün siparişleri Trendyol'dan çekiliyor...`,
     });
 
     try {
@@ -200,18 +214,28 @@ export function InvoicingClient() {
         throw new Error(result.error || result.details || "Senkronizasyon başarısız oldu");
       }
 
-      toast({
-        title: "✅ Senkronizasyon Başarılı!",
-        description: `${result.fetched} sipariş çekildi, ${result.notInvoiced} faturası kesilmemiş sipariş hazırlandı.`,
-      });
+      setLastSync(result);
+
+      if (result.success) {
+        toast({
+          title: "✅ Senkronizasyon Tamamlandı!",
+          description: `${result.fetched} sipariş çekildi, ${result.created} sipariş veritabanına kaydedildi.`,
+        });
+      } else {
+        toast({
+          title: "⚠️ Senkronizasyon Tamamlandı (Hatalarla)",
+          description: `${result.created} sipariş kaydedildi, ${result.errors} hata oluştu.`,
+          variant: "destructive",
+        });
+      }
 
       // Verileri yeniden yükle
       await load();
     } catch (err) {
       console.error("Sync hatası:", err);
       toast({
-        title: "Hata",
-        description: err instanceof Error ? err.message : "Senkronizasyon sırasında hata oluştu",
+        title: "Senkronizasyon Hatası",
+        description: err instanceof Error ? err.message : "Bilinmeyen hata oluştu",
         variant: "destructive",
       });
       await load();
@@ -221,7 +245,14 @@ export function InvoicingClient() {
   };
 
   const handleDeleteAll = async () => {
-    if (!confirm("Tüm sipariş ve fatura kayıtlarını veritabanından silmek istediğinize emin misiniz?")) return;
+    const confirmed = await confirm({
+      title: "Tüm Kayıtları Sil",
+      message: "Tüm sipariş ve fatura kayıtlarını veritabanından kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
+      confirmText: "Evet, Tümünü Sil",
+      cancelText: "Vazgeç",
+      variant: "danger",
+    });
+    if (!confirmed) return;
 
     try {
       setLoading(true);
@@ -279,63 +310,190 @@ export function InvoicingClient() {
 
   return (
     <div className="space-y-6">
-      {/* Senkronizasyon ve Bilgi Kartı */}
-      <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
-              <AlertCircle className="w-6 h-6 text-amber-600 dark:text-amber-400" />
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-foreground">
-                Fatura Bekleyen Trendyol Siparişleri
-              </h3>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Trendyol'dan <strong>"Teslim Edildi"</strong> statüsüne geçmiş ve <strong>faturası kesilmemiş</strong> siparişler en yeniden eskiye doğru listelenir.
+      {/* Başlık ve İşlem Butonları */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-foreground">Trendyol Siparişleri</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Trendyol'dan siparişleri otomatik olarak çekin ve fatura yönetiminde takip edin
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={() => setShowGibModal(true)}
+            disabled={syncing || loading || orders.filter(o => !o.hasInvoice).length === 0}
+            className="px-4 py-2.5 text-xs sm:text-sm font-bold rounded-xl bg-gradient-to-r from-red-600 to-rose-700 text-white hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-md shadow-red-500/20 hover:scale-[1.02] active:scale-[0.98]"
+            title="Bekleyen tüm siparişleri GİB e-Arşiv Taslaklara aktarır"
+          >
+            <Zap className="w-4 h-4 fill-current" />
+            ⚡ e-Arşive Gönder ({orders.filter(o => !o.hasInvoice).length})
+          </button>
+
+          <button
+            onClick={handleDeleteAll}
+            disabled={syncing || loading || orders.length === 0}
+            className="px-3.5 py-2.5 text-xs sm:text-sm font-semibold rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm"
+            title="Tüm veritabanı kayıtlarını sil"
+          >
+            <Trash2 className="w-4 h-4" />
+            Tümünü Sil
+          </button>
+        </div>
+      </div>
+
+      {/* Sync Butonları */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+        <button
+          onClick={() => handleSync(7)}
+          disabled={syncing || loading}
+          className="flex flex-col items-center gap-3 p-6 bg-card border border-border rounded-2xl hover:shadow-lg hover:border-blue-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed group cursor-pointer"
+        >
+          <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center group-hover:bg-blue-500/20 transition-colors">
+            <Calendar className="w-6 h-6 text-blue-500" />
+          </div>
+          <div className="text-center">
+            <p className="font-semibold text-foreground">Son 7 Gün</p>
+            <p className="text-xs text-muted-foreground">Hızlı sync</p>
+          </div>
+        </button>
+
+        <button
+          onClick={() => handleSync(30)}
+          disabled={syncing || loading}
+          className="flex flex-col items-center gap-3 p-6 bg-card border border-border rounded-2xl hover:shadow-lg hover:border-violet-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed group cursor-pointer"
+        >
+          <div className="w-12 h-12 rounded-xl bg-violet-500/10 flex items-center justify-center group-hover:bg-violet-500/20 transition-colors">
+            <Calendar className="w-6 h-6 text-violet-500" />
+          </div>
+          <div className="text-center">
+            <p className="font-semibold text-foreground">Son 30 Gün</p>
+            <p className="text-xs text-muted-foreground">Aylık sync</p>
+          </div>
+        </button>
+
+        <button
+          onClick={() => handleSync(90)}
+          disabled={syncing || loading}
+          className="flex flex-col items-center gap-3 p-6 bg-card border border-border rounded-2xl hover:shadow-lg hover:border-amber-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed group cursor-pointer"
+        >
+          <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center group-hover:bg-amber-500/20 transition-colors">
+            <Calendar className="w-6 h-6 text-amber-500" />
+          </div>
+          <div className="text-center">
+            <p className="font-semibold text-foreground">Son 90 Gün</p>
+            <p className="text-xs text-muted-foreground">Çeyrek sync</p>
+          </div>
+        </button>
+
+        <button
+          onClick={() => handleSync(365)}
+          disabled={syncing || loading}
+          className="flex flex-col items-center gap-3 p-6 bg-card border border-border rounded-2xl hover:shadow-lg hover:border-emerald-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed group cursor-pointer"
+        >
+          <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center group-hover:bg-emerald-500/20 transition-colors">
+            <Download className="w-6 h-6 text-emerald-500" />
+          </div>
+          <div className="text-center">
+            <p className="font-semibold text-foreground">Son 1 Yıl</p>
+            <p className="text-xs text-muted-foreground">Tam sync</p>
+          </div>
+        </button>
+      </div>
+
+      {/* Syncing Progress */}
+      {syncing && (
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-6">
+          <div className="flex items-center gap-4">
+            <RefreshCw className="w-6 h-6 text-blue-500 animate-spin" />
+            <div className="flex-1">
+              <p className="font-semibold text-foreground">Siparişler çekiliyor...</p>
+              <p className="text-sm text-muted-foreground">
+                Bu işlem birkaç dakika sürebilir
               </p>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Sync ve Tümünü Sil Butonları */}
-          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-            <span className="text-xs font-semibold text-muted-foreground mr-1">Temizle & Çek:</span>
-            {[
-              { label: "Son 7 Gün", days: 7 },
-              { label: "Son 30 Gün", days: 30 },
-              { label: "Son 90 Gün", days: 90 },
-              { label: "Son 1 Yıl", days: 365 },
-            ].map(({ label, days }) => (
-              <button
-                key={days}
-                onClick={() => handleSync(days)}
-                disabled={syncing || loading}
-                className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:scale-[1.02] active:scale-[0.98]"
-              >
-                {syncing ? "Çekiliyor..." : label}
-              </button>
-            ))}
-
-            <button
-              onClick={() => setShowGibModal(true)}
-              disabled={syncing || loading || orders.filter(o => !o.hasInvoice).length === 0}
-              className="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-red-600 to-rose-700 text-white hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-md shadow-red-500/20 hover:scale-[1.02] active:scale-[0.98]"
-              title="Bekleyen tüm siparişleri GİB e-Arşiv Taslaklara aktarır"
-            >
-              <Zap className="w-3.5 h-3.5 fill-current" />
-              ⚡ e-Arşive Gönder ({orders.filter(o => !o.hasInvoice).length})
-            </button>
-
-            <button
-              onClick={handleDeleteAll}
-              disabled={syncing || loading || orders.length === 0}
-              className="px-3 py-2 text-xs font-semibold rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm"
-              title="Tüm veritabanı kayıtlarını sil"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Tümünü Sil
-            </button>
+      {/* Last Sync Result */}
+      {lastSync && !syncing && (
+        <div className={`border rounded-2xl p-6 ${
+          lastSync.success && lastSync.errors === 0
+            ? "bg-emerald-500/10 border-emerald-500/20"
+            : "bg-amber-500/10 border-amber-500/20"
+        }`}>
+          <div className="flex items-start gap-4">
+            {lastSync.success && lastSync.errors === 0 ? (
+              <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" />
+            ) : (
+              <AlertCircle className="w-6 h-6 text-amber-500 shrink-0" />
+            )}
+            <div className="flex-1">
+              <p className="font-semibold text-foreground mb-2">
+                Son Senkronizasyon Sonucu
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+                <div>
+                  <p className="text-muted-foreground">Toplam</p>
+                  <p className="font-bold text-foreground">{lastSync.fetched}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Kaydedilen</p>
+                  <p className="font-bold text-emerald-600">{lastSync.created}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Teslim Edilmiş</p>
+                  <p className="font-bold text-blue-600">{lastSync.delivered ?? lastSync.updated ?? 0}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Fatura Bekleyen</p>
+                  <p className="font-bold text-orange-600">{lastSync.notInvoiced ?? lastSync.deleted ?? 0}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Hata</p>
+                  <p className="font-bold text-red-600">{lastSync.errors}</p>
+                </div>
+              </div>
+              {lastSync.errorMessage && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  {lastSync.errorMessage}
+                </p>
+              )}
+            </div>
           </div>
         </div>
+      )}
+
+      {/* Bilgilendirme */}
+      <div className="bg-card/50 border border-border rounded-2xl p-6">
+        <h3 className="font-semibold text-foreground mb-3">💡 Nasıl Çalışır?</h3>
+        <ul className="space-y-2 text-sm text-muted-foreground">
+          <li className="flex items-start gap-2">
+            <span className="text-blue-500 shrink-0 font-bold">1.</span>
+            <span>
+              Yukarıdaki butonlardan birini seçerek Trendyol'dan siparişleri çekin
+            </span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-blue-500 shrink-0 font-bold">2.</span>
+            <span>
+              Siparişler otomatik olarak veritabanına kaydedilir
+            </span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-blue-500 shrink-0 font-bold">3.</span>
+            <span>
+              "Teslim Edildi" statüsündeki siparişler <strong>Fatura Yönetimi</strong> sayfasında görünür
+            </span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-blue-500 shrink-0 font-bold">4.</span>
+            <span>
+              3+ gün geçmiş ve fatura kesilmemiş siparişler otomatik olarak listelenir
+            </span>
+          </li>
+        </ul>
       </div>
 
       {/* İstatistikler */}
@@ -544,6 +702,9 @@ export function InvoicingClient() {
           onSuccess={load}
         />
       )}
+
+      {/* Onay Pop-up Dialog */}
+      <ConfirmDialog />
     </div>
   );
 }

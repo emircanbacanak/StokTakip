@@ -14,6 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { sanitizeTrendyolDescription } from "@/lib/trendyol-api-client";
 
 const SELLER_ID   = process.env.TRENDYOL_SELLER_ID ?? "";
 const API_KEY     = process.env.TRENDYOL_API_KEY ?? "";
@@ -109,6 +110,150 @@ export async function POST(req: NextRequest) {
   try {
     const payload = await req.json();
 
+    // Supabase client (service role ile DB'ye yazar)
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+        ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        ?? ""
+    );
+
+    // ─── ÇOKLU VARYANT / ÇOKLU RENK GÖNDERİMİ (payload.items) ───
+    if (payload.items && Array.isArray(payload.items) && payload.items.length > 0) {
+      const mainTitle = payload.title || payload.items[0].title || "Yeni Ürün";
+      const modelCode =
+        payload.model_code ||
+        payload.product_main_id ||
+        payload.items[0].modelCode ||
+        payload.items[0].productMainId ||
+        generateStockCode(mainTitle).replace(/^SKU-/, "MOD-");
+
+      const preparedItems: any[] = [];
+      const dbRecords: any[] = [];
+
+      for (const variant of payload.items) {
+        const vTitle = variant.title || mainTitle;
+        const vBarcode = variant.barcode?.trim() || generateBarcode();
+        const vStockCode = variant.stock_code?.trim() || variant.stockCode?.trim() || generateStockCode(vTitle);
+        const vImages = (variant.image_urls ?? variant.images ?? payload.image_urls ?? []).map((img: any) =>
+          typeof img === "string" ? img : img.url
+        );
+        const vSalePrice = Number(variant.sale_price ?? variant.salePrice ?? payload.sale_price ?? 330);
+        const vListPrice = Number(variant.list_price ?? variant.listPrice ?? payload.list_price ?? vSalePrice);
+        const vQuantity = Number(variant.quantity ?? payload.quantity ?? 100);
+        const vDesi = Number(variant.desi ?? variant.dimensionalWeight ?? payload.desi ?? 2);
+        const vVatRate = Number(variant.vat_rate ?? variant.vatRate ?? payload.vat_rate ?? 20);
+
+        const rawDesc = payload.description ?? variant.description ?? "-";
+        const cleanDesc = rawDesc && rawDesc !== "-" ? sanitizeTrendyolDescription(rawDesc) : "-";
+
+        // Trendyol v2 item
+        preparedItems.push({
+          barcode: vBarcode,
+          title: vTitle,
+          productMainId: modelCode,
+          brandId: payload.brand_id ?? variant.brand_id ?? 1066155,
+          categoryId: payload.trendyol_category_id ?? payload.category_id ?? variant.category_id ?? 1881,
+          quantity: vQuantity,
+          stockCode: vStockCode,
+          dimensionalWeight: vDesi,
+          description: cleanDesc,
+          currencyType: "TRY",
+          listPrice: vListPrice,
+          salePrice: vSalePrice,
+          vatRate: vVatRate,
+          cargoCompanyId: 10,
+          images: vImages.slice(0, 8).map((url: string) => ({ url })),
+          attributes: variant.attributes ?? payload.attributes ?? [],
+        });
+
+        // Supabase DB record
+        dbRecords.push({
+          product_id: null,
+          title: vTitle,
+          description: cleanDesc,
+          barcode: vBarcode,
+          stock_code: vStockCode,
+          brand_name: payload.brand_name ?? variant.brand_name ?? "ahenk tasarım",
+          list_price: vListPrice,
+          sale_price: vSalePrice,
+          vat_rate: vVatRate,
+          quantity: vQuantity,
+          image_urls: vImages,
+          cargo_company: payload.cargo_company ?? null,
+          desi: vDesi,
+          warranty_months: 0,
+          trendyol_status: "pending",
+          batch_id: modelCode, // Model Kodu batch_id alanında saklanır
+          submitted_at: new Date().toISOString(),
+        });
+      }
+
+      // Supabase'e toplu upsert
+      try {
+        await supabase.from("trendyol_listings").upsert(dbRecords, { onConflict: "barcode" });
+      } catch (dbErr) {
+        console.error("[trendyol-submit] DB toplu kayıt hatası:", dbErr);
+      }
+
+      // Simülasyon modu kontrolü
+      if (!SELLER_ID || !API_KEY || !API_SECRET) {
+        return NextResponse.json({
+          success: true,
+          simulation: true,
+          model_code: modelCode,
+          count: preparedItems.length,
+          items: preparedItems,
+        });
+      }
+
+      // Gerçek Trendyol API Toplu Gönderim
+      const url = `${TRENDYOL_URL}/product/suppliers/${SELLER_ID}/v2/products`;
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: trendyolHeaders(),
+          body: JSON.stringify({ items: preparedItems }),
+        });
+      } catch (netErr) {
+        return NextResponse.json(
+          { success: false, error: `Trendyol ağ hatası: ${(netErr as Error).message}` },
+          { status: 502 }
+        );
+      }
+
+      if (!res.ok) {
+        const errText = await res.text();
+        return NextResponse.json(
+          { success: false, error: `Trendyol ${res.status}: ${errText.slice(0, 400)}` },
+          { status: 422 }
+        );
+      }
+
+      const resJson = await res.json();
+      const batchRequestId = resJson?.batchRequestId;
+
+      if (batchRequestId) {
+        try {
+          const barcodes = dbRecords.map((r) => r.barcode);
+          await supabase
+            .from("trendyol_listings")
+            .update({ trendyol_product_id: batchRequestId })
+            .in("barcode", barcodes);
+        } catch { /* ignore */ }
+      }
+
+      return NextResponse.json({
+        success: true,
+        batch_id: batchRequestId,
+        model_code: modelCode,
+        count: preparedItems.length,
+        items: preparedItems.map((p) => ({ barcode: p.barcode, stock_code: p.stockCode })),
+      });
+    }
+
+    // ─── TEKİL ÜRÜN GÖNDERİMİ (Geriye Dönük Uyumluluk) ───
     if (!payload.title || !payload.sale_price) {
       return NextResponse.json(
         { success: false, error: "title ve sale_price zorunludur" },
@@ -116,38 +261,37 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const barcode   = generateBarcode();
-    const stockCode = generateStockCode(payload.title);
+    const barcode = payload.barcode?.trim() || generateBarcode();
+    const stockCode = payload.stock_code?.trim() || generateStockCode(payload.title);
+    const modelCode =
+      payload.model_code ||
+      payload.product_main_id ||
+      stockCode.split("-").slice(0, 3).join("-") ||
+      stockCode;
 
-    // Supabase client (service role ile DB'ye yazar)
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-      process.env.SUPABASE_SERVICE_ROLE_KEY
-        ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY  // fallback: anon key
-        ?? ""
-    );
+    const rawSingleDesc = payload.description ?? "-";
+    const cleanSingleDesc = rawSingleDesc && rawSingleDesc !== "-" ? sanitizeTrendyolDescription(rawSingleDesc) : "-";
 
     const dbRecord = {
-      product_id:      payload.product_id ?? null,
-      title:           payload.title,
-      description:     payload.description ?? "-",
+      product_id: payload.product_id ?? null,
+      title: payload.title,
+      description: cleanSingleDesc,
       barcode,
-      stock_code:      stockCode,
-      brand_name:      payload.brand_name ?? "Yok",
-      list_price:      payload.list_price ?? payload.sale_price,
-      sale_price:      payload.sale_price,
-      vat_rate:        payload.vat_rate ?? 20,
-      quantity:        payload.quantity ?? 100,
-      image_urls:      payload.image_urls ?? [],
-      cargo_company:   payload.cargo_company ?? null,
-      desi:            payload.desi ?? null,
+      stock_code: stockCode,
+      brand_name: payload.brand_name ?? "Yok",
+      list_price: payload.list_price ?? payload.sale_price,
+      sale_price: payload.sale_price,
+      vat_rate: payload.vat_rate ?? 20,
+      quantity: payload.quantity ?? 100,
+      image_urls: payload.image_urls ?? [],
+      cargo_company: payload.cargo_company ?? null,
+      desi: payload.desi ?? null,
       warranty_months: payload.warranty_months ?? 0,
       trendyol_status: "pending" as const,
-      batch_id:        payload.batch_id ?? null,
-      submitted_at:    new Date().toISOString(),
+      batch_id: modelCode, // Model Kodu
+      submitted_at: new Date().toISOString(),
     };
 
-    // DB'ye kayıt — hata olsa da devam et
     let listingId: string | null = payload.listing_id ?? null;
     try {
       if (listingId) {
@@ -158,7 +302,8 @@ export async function POST(req: NextRequest) {
       }
     } catch (dbErr) {
       console.error("[trendyol-submit] DB hatası:", dbErr);
-    }    // Simülasyon modu — SELLER_ID yoksa gerçek API çağrısı yapma
+    }
+
     if (!SELLER_ID || !API_KEY || !API_SECRET) {
       if (listingId) {
         try {
@@ -174,57 +319,57 @@ export async function POST(req: NextRequest) {
         listing_id: listingId,
         barcode,
         stock_code: stockCode,
+        model_code: modelCode,
       });
     }
 
-    // Gerçek Trendyol API çağrısı
     const trendyolItem = {
       barcode,
-      title:            payload.title,
-      productMainId:    stockCode,
-      brandId:          payload.brand_id ?? 0,
-      categoryId:       payload.trendyol_category_id ?? 411,
-      quantity:         payload.quantity ?? 100,
+      title: payload.title,
+      productMainId: modelCode,
+      brandId: payload.brand_id ?? 0,
+      categoryId: payload.trendyol_category_id ?? 411,
+      quantity: payload.quantity ?? 100,
       stockCode,
       dimensionalWeight: payload.desi ?? 1,
-      description:      payload.description ?? "-",
-      currencyType:     "TRY",
-      listPrice:        payload.list_price ?? payload.sale_price,
-      salePrice:        payload.sale_price,
-      vatRate:          payload.vat_rate ?? 20,
-      cargoCompanyId:   10,
-      images:           (payload.image_urls ?? []).slice(0, 8).map((url: string) => ({ url })),
-      attributes:       payload.attributes ?? [],
+      description: cleanSingleDesc,
+      currencyType: "TRY",
+      listPrice: payload.list_price ?? payload.sale_price,
+      salePrice: payload.sale_price,
+      vatRate: payload.vat_rate ?? 20,
+      cargoCompanyId: 10,
+      images: (payload.image_urls ?? []).slice(0, 8).map((url: string) => ({ url })),
+      attributes: payload.attributes ?? [],
     };
 
     const result = await pushToTrendyol(trendyolItem);
 
-    // DB güncelle
     if (listingId) {
       try {
         await supabase.from("trendyol_listings").update({
-          barcode:              result.barcode,
-          stock_code:           stockCode,
-          // 5xx geçici hata → draft olarak bırak (sonra "Yeniden Gönder" ile denenebilir)
-          trendyol_status:      result.success ? "pending" : result.savedAsDraft ? "draft" : "rejected",
-          rejection_reason:     result.success ? null : result.error,
-          trendyol_product_id:  result.batchId ?? null,
+          barcode: result.barcode,
+          stock_code: stockCode,
+          trendyol_status: result.success ? "pending" : result.savedAsDraft ? "draft" : "rejected",
+          rejection_reason: result.success ? null : result.error,
+          trendyol_product_id: result.batchId ?? null,
         }).eq("id", listingId);
       } catch { /* ignore */ }
     }
 
-    return NextResponse.json({
-      success:           result.success,
-      listing_id:        listingId,
-      barcode:           result.barcode,
-      stock_code:        stockCode,
-      trendyol_batch_id: result.batchId,
-      attempts:          result.attempts,
-      error:             result.error,
-      saved_as_draft:    result.savedAsDraft ?? false,
-    // savedAsDraft → taslak kaydedildi, kullanıcıya başarı gibi göster (200)
-    }, { status: (result.success || result.savedAsDraft) ? 200 : 422 });
-
+    return NextResponse.json(
+      {
+        success: result.success,
+        listing_id: listingId,
+        barcode: result.barcode,
+        stock_code: stockCode,
+        model_code: modelCode,
+        trendyol_batch_id: result.batchId,
+        attempts: result.attempts,
+        error: result.error,
+        saved_as_draft: result.savedAsDraft ?? false,
+      },
+      { status: result.success || result.savedAsDraft ? 200 : 422 }
+    );
   } catch (err) {
     console.error("[trendyol-submit] Beklenmeyen hata:", err);
     return NextResponse.json(

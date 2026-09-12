@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { Plus, Trash2, Loader2, X, Image as ImageIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useConfirm } from "@/hooks/use-confirm";
 import type { ProductImage } from "@/lib/types/database";
 
 interface ProductGalleryProps {
@@ -17,6 +18,7 @@ export function ProductGallery({ productId, onClose }: ProductGalleryProps) {
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
   const sb = createClient();
 
   useEffect(() => {
@@ -86,7 +88,14 @@ export function ProductGallery({ productId, onClose }: ProductGalleryProps) {
   }
 
   async function deleteImage(imageId: string, url: string) {
-    if (!confirm("Bu resmi silmek istediğinizden emin misiniz?")) return;
+    const confirmed = await confirm({
+      title: "Görseli Sil",
+      message: "Bu resmi silmek istediğinizden emin misiniz?",
+      confirmText: "Evet, Sil",
+      cancelText: "Vazgeç",
+      variant: "danger",
+    });
+    if (!confirmed) return;
 
     // Supabase storage'dan sil
     try {
@@ -167,6 +176,9 @@ export function ProductGallery({ productId, onClose }: ProductGalleryProps) {
           />
         </div>
       )}
+
+      {/* Onay Pop-up Dialog */}
+      <ConfirmDialog />
     </div>
   );
 }

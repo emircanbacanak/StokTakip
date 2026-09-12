@@ -90,14 +90,24 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ brands: [], _fallback: true, reason: "API key eksik" });
     }
 
-    // Trendyol brand API'sinde name filtresi çalışmıyor.
-    // Önbelleğe alınmış marka listesinden client-side search yapıyoruz.
-    // İlk çağrıda tüm sayfaları çekip önbelleğe alır.
-    if (!brandCache || Date.now() - brandCache.ts > BRAND_CACHE_TTL) {
-      // Arka planda yükle — ilk sorgu boş dönebilir, ikincisi cache'den gelir
-      loadBrandCache().catch(() => {});
+    try {
+      const url = `${BASE_URL}/product/brands/by-name?name=${encodeURIComponent(name)}`;
+      const res = await fetch(url, { headers: headers() });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : data.brands ?? [];
+        const brands = list.map((b: { id: number; name: string }) => ({
+          id: b.id,
+          name: b.name,
+        }));
+        return NextResponse.json({ brands });
+      }
+      console.warn(`[trendyol-meta/brands] ${url} → ${res.status}`);
+    } catch (e) {
+      console.error("[trendyol-meta/brands]", e);
     }
 
+    // Fallback: cache search
     if (brandCache) {
       const q = name.toLowerCase();
       const filtered = brandCache.data
@@ -111,7 +121,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ brands: filtered });
     }
 
-    return NextResponse.json({ brands: [], _loading: true });
+    return NextResponse.json({ brands: [] });
   }
 
   // ── Kategori Ağacı ──────────────────────────────────────────────────────────

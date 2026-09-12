@@ -1,3 +1,4 @@
+/// <reference path="./deno.d.ts" />
 /**
  * Supabase Edge Function: trendyol-api
  * Deno/TypeScript — production-ready
@@ -6,8 +7,7 @@
  *  1. Ürünü Trendyol Satıcı API'ye gönder (POST /products)
  *  2. Otonom barkod üret (timestamp + random, kullanıcıdan istenmez)
  *  3. Retry mekanizması: barkod çakışması (400) → yeni barkod üret, max 5 deneme
- *  4. "Toptan sipariş vermeyin." → açıklama her zaman bu önekle başlar
- *  5. Supabase DB'ye kayıt at (trendyol_listings tablosu)
+ *  4. Supabase DB'ye kayıt at (trendyol_listings tablosu)
  */
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
@@ -26,7 +26,7 @@ interface ProductPayload {
   product_id?: string;
   category_id?: string;
   title: string;
-  description: string;        // "Toptan sipariş vermeyin." öneki sisteme bırakıldı
+  description: string;
   brand_name?: string;
   list_price: number;
   sale_price: number;
@@ -59,14 +59,6 @@ interface TrendyolItem {
 }
 
 // ─── YARDIMCILAR ─────────────────────────────────────────────────────────────
-
-/** "Toptan sipariş vermeyin." önekini garantiye al */
-function enforceDescriptionPrefix(description: string): string {
-  const PREFIX = "Toptan sipariş vermeyin. ";
-  const trimmed = (description ?? "").trim();
-  if (trimmed.startsWith(PREFIX)) return trimmed;
-  return PREFIX + trimmed;
-}
 
 /** Otonom benzersiz barkod üret: TY + timestamp(ms, base36) + random(4 char) */
 function generateBarcode(): string {
@@ -166,7 +158,7 @@ async function pushToTrendyol(
 
 // ─── REQUEST HANDLER ─────────────────────────────────────────────────────────
 
-serve(async (req) => {
+serve(async (req: Request) => {
   // CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -190,8 +182,10 @@ serve(async (req) => {
       );
     }
 
-    // ── Açıklama öneki zorunlu kural ──────────────────────────────
-    const description = enforceDescriptionPrefix(payload.description ?? "");
+    // ── Açıklama temizliği ───────────────────────────────────────
+    const description = (payload.description ?? "")
+      .replace(/Toptan sipari[şs] vermeyin\.?\s*/gi, "")
+      .trim();
 
     // ── Otonom Barkod & SKU ───────────────────────────────────────
     const barcode = generateBarcode();

@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS trendyol_listings (
 
   -- Trendyol Alanları
   title              text NOT NULL,
-  description        text NOT NULL,        -- sistem daima "Toptan sipariş vermeyin." önekini ekler
+  description        text NOT NULL,
   barcode            text UNIQUE NOT NULL, -- otonom üretilir, çakışmaz
   stock_code         text UNIQUE NOT NULL, -- satıcı stok kodu (SKU)
   brand_name         text NOT NULL DEFAULT 'Yok',
@@ -97,28 +97,9 @@ CREATE TRIGGER trg_product_templates_updated_at
   BEFORE UPDATE ON product_templates
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- ─── 6. AÇIKLAMA ZORUNLU KURAL TETİKLEYİCİSİ ─────────────────
--- "Toptan sipariş vermeyin." ibaresi her zaman başa eklenir.
-CREATE OR REPLACE FUNCTION enforce_description_prefix()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
-DECLARE
-  prefix text := 'Toptan sipariş vermeyin. ';
-BEGIN
-  -- Boşluk/satır başı dahil prefix olmayan her durumda ekle
-  IF NEW.description IS NULL OR NEW.description = '' THEN
-    NEW.description := prefix;
-  ELSIF position(prefix IN NEW.description) <> 1 THEN
-    -- Kullanıcı silmiş veya hiç eklememiş → başa ekle
-    NEW.description := prefix || NEW.description;
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
+-- ─── 6. AÇIKLAMA TETİKLEYİCİSİ (KALDIRILDI) ─────────────────────
 DROP TRIGGER IF EXISTS trg_enforce_description_prefix ON trendyol_listings;
-CREATE TRIGGER trg_enforce_description_prefix
-  BEFORE INSERT OR UPDATE ON trendyol_listings
-  FOR EACH ROW EXECUTE FUNCTION enforce_description_prefix();
+DROP FUNCTION IF EXISTS enforce_description_prefix();
 
 -- ─── 7. ROW LEVEL SECURITY ─────────────────────────────────────
 ALTER TABLE categories         ENABLE ROW LEVEL SECURITY;

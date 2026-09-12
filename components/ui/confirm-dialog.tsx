@@ -14,7 +14,7 @@ export function ConfirmDialog({
 }: {
   open: boolean;
   title: string;
-  message: string;
+  message: React.ReactNode;
   confirmText?: string;
   cancelText?: string;
   variant?: "danger" | "warning" | "info";
@@ -25,16 +25,16 @@ export function ConfirmDialog({
 
   const variantStyles = {
     danger: {
-      icon: "bg-red-500/10 text-red-600",
-      button: "bg-gradient-to-r from-red-500 to-red-600",
+      icon: "bg-red-500/10 text-red-600 dark:text-red-400",
+      button: "bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700",
     },
     warning: {
-      icon: "bg-amber-500/10 text-amber-600",
-      button: "bg-gradient-to-r from-amber-500 to-amber-600",
+      icon: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      button: "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700",
     },
     info: {
-      icon: "bg-blue-500/10 text-blue-600",
-      button: "bg-gradient-to-r from-blue-500 to-blue-600",
+      icon: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+      button: "bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700",
     },
   };
 
@@ -42,8 +42,8 @@ export function ConfirmDialog({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
-      <div className="relative bg-card w-full max-w-md rounded-2xl border border-border shadow-2xl">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150" onClick={onCancel} />
+      <div className="relative bg-card w-full max-w-md rounded-2xl border border-border shadow-2xl animate-in fade-in zoom-in-95 duration-150 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2">
@@ -62,7 +62,11 @@ export function ConfirmDialog({
 
         {/* Content */}
         <div className="p-5">
-          <p className="text-sm text-muted-foreground">{message}</p>
+          {typeof message === "string" ? (
+            <div className="text-sm text-foreground/85 whitespace-pre-line leading-relaxed">{message}</div>
+          ) : (
+            message
+          )}
         </div>
 
         {/* Footer */}

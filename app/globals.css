@@ -29,6 +29,16 @@
     --sidebar-border: 220 13% 91%;
     --gradient-from: #3b82f6;
     --gradient-to: #8b5cf6;
+
+    /* Trendyol Baklava Rich Editor Font Sizes */
+    --bl-font-size-2xs: 10px;
+    --bl-font-size-xs: 12px;
+    --bl-font-size-s: 14px;
+    --bl-font-size-m: 16px;
+    --bl-font-size-l: 18px;
+    --bl-font-size-xl: 20px;
+    --bl-font-size-2xl: 24px;
+    --bl-font-size-3xl: 32px;
   }
 
   .dark {
@@ -99,3 +109,17 @@ input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
+
+/* Trendyol Rich Editor Font Size Styles */
+span.size, .size {
+  display: inline;
+  line-height: normal;
+}
+span[style*="--bl-font-size-2xs"] { font-size: 10px !important; line-height: 1.3 !important; }
+span[style*="--bl-font-size-xs"] { font-size: 12px !important; line-height: 1.4 !important; }
+span[style*="--bl-font-size-s"] { font-size: 14px !important; line-height: 1.4 !important; }
+span[style*="--bl-font-size-m"] { font-size: 16px !important; line-height: 1.5 !important; }
+span[style*="--bl-font-size-l"] { font-size: 18px !important; line-height: 1.5 !important; }
+span[style*="--bl-font-size-xl"] { font-size: 20px !important; line-height: 1.5 !important; }
+span[style*="--bl-font-size-2xl"] { font-size: 24px !important; line-height: 1.4 !important; }
+span[style*="--bl-font-size-3xl"] { font-size: 32px !important; line-height: 1.3 !important; }

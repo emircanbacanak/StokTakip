@@ -306,11 +306,10 @@ export async function runGibBrowserAutomation(options: GibBrowserOptions) {
           await new Promise((r) => setTimeout(r, 600));
         }
 
-        // ADIM 7: Kullanıcı Onayı (2 Dakika Bekleme & Canlı Onay Butonu)
-        console.log(`⏱️ 7. Adım: Form dolduruldu. Onayınız için 2 dakika bekleniyor (veya ekrandaki butona basabilirsiniz)...`);
+        // ADIM 7: Faturayı Otomatik Oluştur (Kullanıcı onayı beklemeden sıradakine geç)
+        console.log(`💾 7. Adım: Form dolduruldu. Fatura otomatik oluşturuluyor...`);
 
         await page.evaluate(({ orderNumber, current, total }) => {
-          // Sayfanın üstüne canlı onay kutusu ekle
           const oldBox = document.getElementById("stocktakip-helper-box");
           if (oldBox) oldBox.remove();
 
@@ -323,77 +322,31 @@ export async function runGibBrowserAutomation(options: GibBrowserOptions) {
           helper.style.zIndex = "999999";
           helper.style.backgroundColor = "#1E293B";
           helper.style.color = "#FFFFFF";
-          helper.style.padding = "16px 24px";
-          helper.style.borderRadius = "16px";
-          helper.style.boxShadow = "0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)";
+          helper.style.padding = "14px 22px";
+          helper.style.borderRadius = "14px";
+          helper.style.boxShadow = "0 20px 25px -5px rgba(0, 0, 0, 0.5)";
           helper.style.border = "2px solid #3B82F6";
           helper.style.display = "flex";
           helper.style.alignItems = "center";
-          helper.style.gap = "16px";
+          helper.style.gap = "14px";
           helper.style.fontFamily = "sans-serif";
 
           helper.innerHTML = `
-            <div style="font-size: 24px;">📋</div>
+            <div style="font-size: 22px;">⚡</div>
             <div>
-              <div style="font-weight: bold; font-size: 15px; color: #60A5FA;">
-                [${current}/${total}] Sipariş #${orderNumber} Bilgileri Dolduruldu!
+              <div style="font-weight: bold; font-size: 14px; color: #60A5FA;">
+                [${current}/${total}] Sipariş #${orderNumber} Faturası Kaydediliyor...
               </div>
               <div style="font-size: 12px; color: #94A3B8; margin-top: 2px;">
-                Bilgileri kontrol edebilirsiniz. <span id="st-countdown" style="font-weight: bold; color: #F59E0B;">120</span> sn sonra veya butona basınca sıradakine geçilecek.
+                Otomatik olarak onaylanıp sıradaki faturaya geçiliyor.
               </div>
             </div>
-            <button id="st-confirm-btn" style="
-              background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-              color: white;
-              border: none;
-              padding: 10px 20px;
-              border-radius: 10px;
-              font-weight: bold;
-              cursor: pointer;
-              font-size: 13px;
-              box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.4);
-            ">
-              ✅ Şimdi Onayla & Sıradakine Geç
-            </button>
           `;
 
           document.body.appendChild(helper);
-
-          // Sayacı başlat
-          let remaining = 120;
-          // @ts-ignore
-          window.stockTakipConfirmed = false;
-
-          const interval = setInterval(() => {
-            remaining--;
-            const countEl = document.getElementById("st-countdown");
-            if (countEl) countEl.innerText = String(remaining);
-
-            // @ts-ignore
-            if (remaining <= 0 || window.stockTakipConfirmed) {
-              clearInterval(interval);
-              // @ts-ignore
-              window.stockTakipConfirmed = true;
-            }
-          }, 1000);
-
-          const btn = document.getElementById("st-confirm-btn");
-          if (btn) {
-            btn.onclick = () => {
-              // @ts-ignore
-              window.stockTakipConfirmed = true;
-            };
-          }
         }, { orderNumber: order.order_number, current: i + 1, total: orders.length });
 
-        // Kullanıcının butona basmasını veya 120 saniyenin dolmasını bekle
-        await page.waitForFunction(
-          () => {
-            // @ts-ignore
-            return window.stockTakipConfirmed === true;
-          },
-          { timeout: 130000 }
-        ).catch(() => {});
+        await new Promise((r) => setTimeout(r, 800));
 
         // Faturayı "Oluştur" butonuna basarak kaydet
         console.log("💾 Fatura 'Oluştur' butonuna basılıyor...");
@@ -421,33 +374,248 @@ export async function runGibBrowserAutomation(options: GibBrowserOptions) {
           }
         });
 
-        await new Promise((r) => setTimeout(r, 1500));
+        await new Promise((r) => setTimeout(r, 1200));
         successCount++;
-        console.log(`✅ Sipariş #${order.order_number} faturası başarıyla oluşturuldu ve onaylandı!`);
+        console.log(`✅ Sipariş #${order.order_number} faturası başarıyla oluşturuldu!`);
       } catch (err) {
         console.error(`❌ Sipariş #${order.order_number} hatası:`, err);
         errors.push(`#${order.order_number}: ${err instanceof Error ? err.message : "Hata"}`);
       }
     }
 
-    // Tüm siparişler bittiğinde Taslaklar listesine dön
-    console.log("🎉 Tüm siparişler işlendi! Taslaklar ekranına geçiliyor...");
+    // =========================================================================
+    // TÜM FATURALAR OLUŞTURULDUKTAN SONRA: İMZA VE SMS SÜRECİ
+    // =========================================================================
+    console.log("🎉 Tüm faturalar oluşturuldu! Belge İşlemleri -> Düzenlenen Belgeler ekranına geçiliyor...");
+
     await page.evaluate(() => {
       const helper = document.getElementById("stocktakip-helper-box");
       if (helper) {
         helper.innerHTML = `
-          <div style="font-size: 24px;">🎉</div>
+          <div style="font-size: 22px;">📜</div>
           <div>
-            <div style="font-weight: bold; font-size: 15px; color: #10B981;">Tüm Faturalar Başarıyla Dolduruldu!</div>
-            <div style="font-size: 12px; color: #94A3B8;">Oluşturulan faturaları GİB Taslaklar ekranında görebilirsiniz.</div>
+            <div style="font-weight: bold; font-size: 14px; color: #38BDF8;">
+              Tüm Faturalar Tamamlandı! Düzenlenen Belgeler Açılıyor...
+            </div>
+            <div style="font-size: 12px; color: #94A3B8; margin-top: 2px;">
+              Belgeler sorgulanıp GİB İmza ve SMS ekranı otomatik açılacak.
+            </div>
           </div>
         `;
       }
+    });
 
-      // @ts-ignore
-      if (typeof yukle === "function") {
-        // @ts-ignore
-        yukle("RG_TASLAKLAR");
+    // ADIM 8: "Belge İşlemleri" menüsünü bul ve gerekirse tıkla
+    await page.evaluate(() => {
+      const allElements = Array.from(document.querySelectorAll("a, span, div, li, td"));
+      const duzenlenenBtn = allElements.find((el) => 
+        (el.textContent || "").trim().includes("Düzenlenen Belgeler e-Arşiv Fatura")
+      );
+      
+      // Eğer "Düzenlenen Belgeler" görünür değilse "Belge İşlemleri" akordeonunu aç
+      if (!duzenlenenBtn || (duzenlenenBtn as HTMLElement).offsetParent === null) {
+        const belgeIslemleri = allElements.find((el) => (el.textContent || "").trim() === "Belge İşlemleri");
+        if (belgeIslemleri) {
+          (belgeIslemleri as HTMLElement).click();
+        }
+      }
+    });
+
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // ADIM 9: "Düzenlenen Belgeler e-Arşiv Fatura (İnteraktif)" tıkla
+    console.log("📂 Düzenlenen Belgeler e-Arşiv Fatura (İnteraktif) menüsüne tıklanıyor...");
+    await page.evaluate(() => {
+      const allElements = Array.from(document.querySelectorAll("a, span, div, li, td"));
+      const duzenlenenBtn = allElements.find((el) => 
+        (el.textContent || "").trim().includes("Düzenlenen Belgeler e-Arşiv Fatura")
+      );
+      if (duzenlenenBtn) {
+        (duzenlenenBtn as HTMLElement).click();
+      }
+    });
+
+    await new Promise((r) => setTimeout(r, 2500));
+
+    // ADIM 10: Ekrana gelen panelden "Sorgula" butonuna bas
+    console.log("🔍 Panelden 'Sorgula' butonuna basılıyor...");
+    await page.waitForFunction(() => {
+      const all = Array.from(document.querySelectorAll("button, input, a, div, span"));
+      return all.some((el) => {
+        const text = (el.textContent || (el as HTMLInputElement).value || "").trim();
+        return text === "Sorgula" || text.includes("Sorgula");
+      });
+    }, { timeout: 15000 }).catch(() => {});
+
+    await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit'], a, div, span"));
+      const sorgulaBtn = all.find((el) => {
+        const text = (el.textContent || (el as HTMLInputElement).value || "").trim();
+        return text === "Sorgula" || text.includes("Sorgula");
+      });
+      if (sorgulaBtn) {
+        (sorgulaBtn as HTMLElement).click();
+      }
+    });
+
+    // Tablonun ve belgelerin yüklenmesini bekle
+    console.log("⏳ Belgelerin listelenmesi bekleniyor...");
+    await new Promise((r) => setTimeout(r, 3000));
+    await page.waitForFunction(() => {
+      const rows = document.querySelectorAll("table tbody tr, .csc-grid tr[rel], tr[id*='grid']");
+      return rows.length > 0;
+    }, { timeout: 10000 }).catch(() => {});
+
+    // ADIM 11: Tabloda en baştaki kutucuğu işaretle (Belge Numarası yanındaki Tümünü Seç kutusu)
+    console.log("☑️ Tablodaki en baştaki kutucuk (Tümünü Seç) işaretleniyor...");
+    await page.evaluate(() => {
+      let clicked = false;
+
+      // 1. "Belge Numarası" başlığının bulunduğu hücredeki veya yanındaki checkbox
+      const allElements = Array.from(document.querySelectorAll("th, td, div, span"));
+      const belgeNoEl = allElements.find((el) => (el.textContent || "").trim().includes("Belge Numarası"));
+      
+      if (belgeNoEl) {
+        const headerCell = belgeNoEl.closest("th, td, div.csc-grid-header, div.x-grid3-hd") || belgeNoEl.parentElement;
+        if (headerCell) {
+          const cb = headerCell.querySelector("input[type='checkbox']") as HTMLInputElement | null;
+          if (cb) {
+            cb.click();
+            cb.checked = true;
+            cb.dispatchEvent(new Event("change", { bubbles: true }));
+            clicked = true;
+          } else {
+            const prev = headerCell.previousElementSibling;
+            if (prev) {
+              const prevCb = prev.querySelector("input[type='checkbox']") as HTMLInputElement | null;
+              if (prevCb) {
+                prevCb.click();
+                prevCb.checked = true;
+                prevCb.dispatchEvent(new Event("change", { bubbles: true }));
+                clicked = true;
+              }
+            }
+          }
+        }
+      }
+
+      // 2. thead içindeki veya tablonun ilk satırındaki checkbox
+      if (!clicked) {
+        const theadCb = document.querySelector("thead input[type='checkbox'], th input[type='checkbox'], .csc-grid-header input[type='checkbox'], .x-grid3-hd-checker") as HTMLElement | null;
+        if (theadCb) {
+          theadCb.click();
+          clicked = true;
+        }
+      }
+
+      // 3. Tablodaki ilk checkbox
+      if (!clicked) {
+        const firstCb = document.querySelector("table input[type='checkbox'], input[type='checkbox']") as HTMLInputElement | null;
+        if (firstCb) {
+          firstCb.click();
+          firstCb.checked = true;
+          firstCb.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+
+      // Güvenlik: Tablo satırlarındaki tüm kutucukların seçildiğinden emin ol
+      const rowCheckboxes = Array.from(document.querySelectorAll("table tbody input[type='checkbox'], .csc-grid-body input[type='checkbox']")) as HTMLInputElement[];
+      rowCheckboxes.forEach((rcb) => {
+        if (!rcb.checked) {
+          rcb.checked = true;
+          rcb.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
+    });
+
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // ADIM 12: "GİB İmza" butonuna tıkla
+    console.log("✍️ 'GİB İmza' butonuna basılıyor...");
+    await page.evaluate(() => {
+      const allBtns = Array.from(document.querySelectorAll("button, input[type='button'], a, div, span"));
+      const imzaBtn = allBtns.find((el) => {
+        const text = (el.textContent || (el as HTMLInputElement).value || "").trim();
+        return text === "GİB İmza" || text.includes("GİB İmza") || text.includes("GİB imza");
+      });
+      if (imzaBtn) {
+        (imzaBtn as HTMLElement).click();
+      }
+    });
+
+    // ADIM 13: Yeni pop up ekranının açılmasını bekle ("SMS Onay")
+    console.log("⏳ 'SMS Onay' açılır penceresi bekleniyor...");
+    await page.waitForFunction(() => {
+      const text = document.body.innerText || "";
+      return text.includes("Uyarıyı Okudum") || text.includes("Şifre Gönder") || text.includes("SMS Onay");
+    }, { timeout: 15000 }).catch(() => {});
+
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // "Uyarıyı Okudum :" kutucuğunu işaretle
+    console.log("☑️ 'Uyarıyı Okudum :' kutucuğu işaretleniyor...");
+    await page.evaluate(() => {
+      const elements = Array.from(document.querySelectorAll("label, span, div, td, p, b, strong"));
+      const uyarElement = elements.find((el) => (el.textContent || "").includes("Uyarıyı Okudum"));
+      let checked = false;
+
+      if (uyarElement) {
+        const container = uyarElement.closest("div, tr, form, p, table") || uyarElement.parentElement;
+        if (container) {
+          const cb = container.querySelector("input[type='checkbox']") as HTMLInputElement | null;
+          if (cb) {
+            cb.click();
+            cb.checked = true;
+            cb.dispatchEvent(new Event("change", { bubbles: true }));
+            checked = true;
+          }
+        }
+      }
+
+      if (!checked) {
+        const modalCheckboxes = Array.from(
+          document.querySelectorAll(".cs-popup-msg-box input[type='checkbox'], .csc-msgbox input[type='checkbox'], .x-window input[type='checkbox'], div[style*='z-index'] input[type='checkbox']")
+        ) as HTMLInputElement[];
+        if (modalCheckboxes.length > 0) {
+          const lastCb = modalCheckboxes[modalCheckboxes.length - 1];
+          lastCb.click();
+          lastCb.checked = true;
+          lastCb.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+    });
+
+    await new Promise((r) => setTimeout(r, 800));
+
+    // ADIM 14: "Şifre Gönder" butonuna tıkla
+    console.log("📲 'Şifre Gönder' butonuna basılıyor...");
+    await page.evaluate(() => {
+      const allBtns = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit'], a, div, span"));
+      const sifreGonderBtn = allBtns.find((el) => {
+        const text = (el.textContent || (el as HTMLInputElement).value || "").trim();
+        return text.includes("Şifre Gönder");
+      });
+      if (sifreGonderBtn) {
+        (sifreGonderBtn as HTMLElement).click();
+      }
+    });
+
+    // ADIM 15: Kullanıcıya SMS şifresinin gönderildiğini belirten bilgilendirme rozeti göster
+    await page.evaluate(() => {
+      const helper = document.getElementById("stocktakip-helper-box");
+      if (helper) {
+        helper.innerHTML = `
+          <div style="font-size: 26px;">📲</div>
+          <div>
+            <div style="font-weight: bold; font-size: 15px; color: #10B981;">
+              SMS Onay Şifresi Gönderildi!
+            </div>
+            <div style="font-size: 12px; color: #E2E8F0; margin-top: 3px;">
+              Lütfen telefonunuza gelen SMS onay kodunu ekrandaki alana girip imzalama işlemini tamamlayınız.
+            </div>
+          </div>
+        `;
+        helper.style.borderColor = "#10B981";
       }
     });
 

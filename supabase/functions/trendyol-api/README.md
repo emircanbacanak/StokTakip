@@ -29,4 +29,3 @@ supabase functions deploy trendyol-api
 
 - **Otonom Barkod:** `TY` + timestamp(base36) + random(4) — kullanıcıdan barkod istenmez
 - **Retry:** Barkod çakışması (400) → yeni barkod üret, max 5 deneme
-- **Açıklama Öneki:** `"Toptan sipariş vermeyin. "` — veritabanı trigger'ı + Edge Function + Frontend üç katmanda da uygulanır

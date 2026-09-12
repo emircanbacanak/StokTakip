@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ShoppingCart, Factory, Users, Package, Palette, Calculator, Store, FileText } from "lucide-react";
+import { LayoutDashboard, ShoppingCart, Factory, Users, Package, Palette, Calculator, Store, FileText, PackagePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -15,6 +15,7 @@ const navItems = [
   { href: "/dashboard/colors", label: "Renkler", icon: Palette },
   { href: "/dashboard/invoicing", label: "Fatura Yönetimi", icon: FileText },
   { href: "/dashboard/accounting", label: "Muhasebe", icon: Calculator },
+  { href: "/dashboard/product-upload", label: "Ürün Yükleme", icon: PackagePlus },
   { href: "/dashboard/trendyol", label: "Trendyol", icon: Store },
 ];
 
