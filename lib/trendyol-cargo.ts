@@ -115,11 +115,34 @@ const STANDART_CARGO_TABLE: Record<number, (number | null)[]> = {
 
 // ─── YARDIMCI FONKSİYONLAR ───────────────────────────────────────────────────
 
-/** Desi için en ucuz standart kargo fiyatı (KDV hariç) */
-function getStandartCargoExVat(desi: number): number {
+export const CARGO_COMPANIES: { id: string; label: string }[] = [
+  { id: "auto", label: "⚡ En Ucuz Kargo (Otomatik)" },
+  { id: "TEX/PTT", label: "Trendyol Express / PTT" },
+  { id: "Aras", label: "Aras Kargo" },
+  { id: "Sürat", label: "Sürat Kargo" },
+  { id: "KolayGelsin", label: "Kolay Gelsin" },
+  { id: "DHL", label: "DHL eCommerce" },
+  { id: "Yurtiçi", label: "Yurtiçi Kargo" },
+];
+
+const COMPANY_INDEX_MAP: Record<string, number> = {
+  "Aras": 0,
+  "DHL": 1,
+  "KolayGelsin": 2,
+  "TEX/PTT": 5,
+  "Sürat": 4,
+  "Yurtiçi": 6,
+};
+
+/** Desi için standart kargo fiyatı (KDV hariç) */
+export function getStandartCargoExVat(desi: number, company?: string): number {
   const keys = Object.keys(STANDART_CARGO_TABLE).map(Number).sort((a, b) => a - b);
   const key = keys.find(k => k >= desi) ?? keys[keys.length - 1];
   const row = STANDART_CARGO_TABLE[key];
+  if (company && COMPANY_INDEX_MAP[company] !== undefined) {
+    const val = row[COMPANY_INDEX_MAP[company]];
+    if (val !== null && val > 0) return val;
+  }
   const valid = row.filter((v): v is number => v !== null && v > 0);
   return Math.min(...valid);
 }
@@ -138,42 +161,34 @@ function getCargoTable(terminSuresiGun: number): CargoTable {
 
 /**
  * Kargo maliyeti hesapla
- * Kural 1: satisFiyati >= 350 VEYA desi >= 10 → Standart
- * Kural 1: satisFiyati < 350 VE desi < 10 → Barem Destek
  */
 export function calcCargoPrice(input: CargoInput): CargoResult {
   const { satisFiyati, desi, kargoFirmasi, terminSuresiGun } = input;
 
-  // Kural 1: Standart mı, Barem mi?
-  const isStandart = satisFiyati >= 350 || desi >= 10;
+  const isStandart = satisFiyati >= 350;
 
   if (isStandart) {
-    const exVat = getStandartCargoExVat(desi);
+    const exVat = getStandartCargoExVat(desi, kargoFirmasi);
     return {
       mode: "standart",
       table: null,
       baremBand: null,
       exVatPrice: exVat,
       incVatPrice: exVat * 1.20,
-      company: null,
+      company: kargoFirmasi ?? null,
     };
   }
 
-  // Kural 2: Tablo seç
   const table = getCargoTable(terminSuresiGun);
-
-  // Kural 3: Barem bandı
   const band = getBaremBand(satisFiyati);
-
-  // Kural 4: Fiyat tablosundan al
-  const exVat = BAREM_PRICES[table][band][kargoFirmasi];
+  const exVat = BAREM_PRICES[table][band][kargoFirmasi] ?? BAREM_PRICES[table][band]["TEX/PTT"];
 
   return {
     mode: "barem",
     table,
     baremBand: band,
     exVatPrice: exVat,
-    incVatPrice: exVat * 1.20, // Kural 5: %20 KDV
+    incVatPrice: exVat * 1.20,
     company: kargoFirmasi,
   };
 }
@@ -207,18 +222,30 @@ export function getCheapestBaremCompany(
 }
 
 /**
- * Mevcut hesaplayıcıyla uyumlu tek fonksiyon:
- * weightGrams + price + fastShipping → KDV dahil kargo maliyeti (TL)
+ * Mevcut hesaplayıcıyla uyumlu fonksiyon:
+ * weightGrams + price + fastShipping + selectedCompany → KDV dahil kargo maliyeti (TL)
  */
 export function calcShippingCost(
   weightGrams: number,
   satisFiyati: number,
-  fastShipping: boolean
+  fastShipping: boolean,
+  selectedCompany?: string
 ): number {
   const desi = Math.max(1, Math.ceil(weightGrams / 1000));
+  const isSpecificCompany = selectedCompany && selectedCompany !== "auto";
 
-  if (satisFiyati >= 350 || desi >= 10) {
-    return getStandartCargoExVat(desi) * 1.20;
+  // Fiyat 350 TL ve üzerindeyse barem dışıdır -> Desi bazlı standart tarife
+  if (satisFiyati >= 350) {
+    return getStandartCargoExVat(desi, isSpecificCompany ? selectedCompany : undefined) * 1.20;
+  }
+
+  if (isSpecificCompany) {
+    const table = fastShipping ? 1 : 2;
+    const band = getBaremBand(satisFiyati);
+    const compPrice = BAREM_PRICES[table]?.[band]?.[selectedCompany as CargoCompany];
+    if (compPrice !== undefined) {
+      return compPrice * 1.20;
+    }
   }
 
   const { incVat } = getCheapestBaremCompany(satisFiyati, fastShipping ? 1 : 2);
@@ -227,7 +254,6 @@ export function calcShippingCost(
 
 /**
  * Kural 6: Fiyat Optimizasyon Önerisi
- * 200–215 TL arasındaki fiyatlar için 199.90 TL simülasyonu
  */
 export interface NetProfitInput {
   satisFiyati: number;
@@ -236,26 +262,27 @@ export interface NetProfitInput {
   packagingCost: number;
   platformFee: number;    // KDV dahil
   fixedCost: number;
-  returnRate: number;     // % (5 gibi)
-  commissionRate: number; // % (15 gibi)
-  paymentTermFee: number; // % (3 gibi)
-  advertisingRate: number;// % (8 gibi, organik ise 0)
+  returnRate: number;     // %
+  commissionRate: number; // %
+  paymentTermFee: number; // %
+  advertisingRate: number;// %
   fastShipping: boolean;
+  selectedCompany?: string;
 }
 
 function calcNetProfit(input: NetProfitInput): number {
   const {
     satisFiyati, productionCost, weightGrams, packagingCost,
     platformFee, fixedCost, returnRate, commissionRate,
-    paymentTermFee, advertisingRate, fastShipping,
+    paymentTermFee, advertisingRate, fastShipping, selectedCompany,
   } = input;
 
-  const shipping = calcShippingCost(weightGrams, satisFiyati, fastShipping);
+  const shipping = calcShippingCost(weightGrams, satisFiyati, fastShipping, selectedCompany);
   const returnCost = (productionCost + shipping + packagingCost) * (returnRate / 100);
   const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
   const priceExVat = satisFiyati / 1.20;
-  const commission = satisFiyati * (commissionRate / 100);  // brüt fiyat üzerinden
-  const termFee = satisFiyati * (paymentTermFee / 100);     // brüt fiyat üzerinden
+  const commission = satisFiyati * (commissionRate / 100);
+  const termFee = satisFiyati * (paymentTermFee / 100);
   const adCost = satisFiyati * (advertisingRate / 100);
   const totalExpenses = baseCost + commission + termFee + adCost;
   return satisFiyati - totalExpenses;

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { FileText, Calendar, User, Package, AlertCircle, Store, Settings, Calculator, TrendingUp, ShoppingBag, Truck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-interface TrendyolProduct {
+interface IdefixProduct {
   id: string;
   productName: string;
   weightGrams: number;
@@ -20,14 +20,14 @@ interface TrendyolProduct {
 }
 
 
-interface TrendyolSettings {
+interface IdefixSettings {
   // Üretim Maliyetleri
   filamentPricePerKg: number;
   electricityCostPerGram: number;
   depreciationCostPerGram: number;
   wastePercentage: number;
 
-  // Trendyol Maliyetleri
+  // İdefix Maliyetleri
   commissionRate: number;
   paymentTermFee: number;
   packagingCost: number;
@@ -56,7 +56,7 @@ interface TrendyolSettings {
   profitMargin: number;         // % — net kâr / satış fiyatı (fiyat üzerinden)
 }
 
-const DEFAULT_TRENDYOL_SETTINGS: TrendyolSettings = {
+const DEFAULT_IDEFIX_SETTINGS: IdefixSettings = {
   filamentPricePerKg: 500,
   electricityCostPerGram: 0.05,
   depreciationCostPerGram: 0.05,
@@ -88,11 +88,11 @@ const DEFAULT_TRENDYOL_SETTINGS: TrendyolSettings = {
 
 // ─── HESAPLAMA MANTIĞI ──────────────────────────────────────────────────────
 //
-// Trendyol gerçek para akışı:
+// İdefix gerçek para akışı:
 //
 //   Alıcı → KDV dahil satış fiyatını öder (P)
 //
-//   Trendyol kesintileri (P'nin tamamı üzerinden, KDV dahil):
+//   İdefix kesintileri (P'nin tamamı üzerinden, KDV dahil):
 //     - Komisyon  = P × komisyon%
 //     - Vade farkı = P × vade%
 //     - Platform hizmet bedeli = sabit TL (KDV dahil)
@@ -157,13 +157,15 @@ interface PricingResult {
 
 // ─── KARGO SERVİSİ ───────────────────────────────────────────────────────────
 // Tüm kargo iş kuralları lib/trendyol-cargo.ts dosyasında tanımlıdır.
-// Bu bileşen yalnızca calcShippingCost ve checkPriceOptimization'ı kullanır.
+// Bu bileşen yalnızca calcMarketplaceShippingCost ve checkPriceOptimization'ı kullanır.
 import {
-  calcShippingCost,
+  calcIdefixShippingCost as calcMarketplaceShippingCost,
+  IDEFIX_CARGO_COMPANIES as MARKETPLACE_CARGO_COMPANIES,
+} from "@/lib/idefix-cargo";
+import {
   checkPriceOptimization,
-  CARGO_COMPANIES,
   type NetProfitInput,
-} from "@/lib/trendyol-cargo";
+} from "@/lib/marketplace-cargo";
 import { calculateProductCost, DEFAULT_COST_SETTINGS } from "@/lib/cost-calculator";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { Product } from "@/lib/types/database";
@@ -178,7 +180,7 @@ function calcDetailedPurchasePrice(
   paymentTermFeePercent: number,
   returnRatePercent: number,
   fixedCostPerOrder: number,
-  s: TrendyolSettings
+  s: IdefixSettings
 ) {
   const KDV_RATE = 0.20;
 
@@ -192,14 +194,15 @@ function calcDetailedPurchasePrice(
   const platformFeeExVat = platformFeeIncVat / (1 + KDV_RATE);
   const platformVat = platformFeeIncVat - platformFeeExVat;
 
-  const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
+  const isOrganic = s.organicSalesMode || (s.advertisingRate === 0);
+  const adRate = isOrganic ? 0 : (s.advertisingRate || 0) / 100;
   const totalCutRate = (commissionRatePercent + paymentTermFeePercent) / 100 + adRate;
   const m = profitMarginPercent / 100;
   const desi = gramsToDesi(weightGrams);
 
   const calcForPrice = (P: number) => {
     if (P <= 0 || !isFinite(P)) return null;
-    const shippingIncVat = calcShippingCost(weightGrams, P, s.fastShipping, s.cargoCompany);
+    const shippingIncVat = calcMarketplaceShippingCost(weightGrams, P, s.fastShipping, s.cargoCompany);
     const shippingExVat = shippingIncVat / (1 + KDV_RATE);
     const shippingVat = shippingIncVat - shippingExVat;
 
@@ -224,16 +227,14 @@ function calcDetailedPurchasePrice(
     const vatPayable = Math.max(0, vatCollected - vatPaidInputs);
     const netProfitAfterVat = netProfit - vatPayable;
 
-    let baremLabel = "Standart Kargo (₺350+)";
+    let baremLabel = "Standart Kargo (₺300+)";
     let baremBadgeClass = "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border-amber-300";
-    if (desi < 10) {
-      if (P < 200) {
-        baremLabel = "🟢 Barem Altı (<₺200 Destekli)";
-        baremBadgeClass = "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-300";
-      } else if (P < 350) {
-        baremLabel = "🔵 Barem Üstü (₺200-₺349 Destekli)";
-        baremBadgeClass = "bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300 border-blue-300";
-      }
+    if (P < 150) {
+      baremLabel = "🟢 50 TL Barem Desteği (<₺150)";
+      baremBadgeClass = "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-300";
+    } else if (P < 300) {
+      baremLabel = "🔵 20 TL Barem Desteği (₺150-₺299)";
+      baremBadgeClass = "bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300 border-blue-300";
     }
 
     return {
@@ -277,25 +278,25 @@ function calcDetailedPurchasePrice(
     return totalBaseExpensesExVat / denom;
   };
 
-  let recPrice = 200;
-  const sh199 = calcShippingCost(weightGrams, 199, s.fastShipping, s.cargoCompany);
-  const p1 = calcExactPriceForShipping(sh199);
+  let recPrice = 150;
+  const sh149 = calcMarketplaceShippingCost(weightGrams, 149, s.fastShipping, s.cargoCompany);
+  const p1 = calcExactPriceForShipping(sh149);
 
-  const sh250 = calcShippingCost(weightGrams, 250, s.fastShipping, s.cargoCompany);
-  const p2 = calcExactPriceForShipping(sh250);
+  const sh200 = calcMarketplaceShippingCost(weightGrams, 200, s.fastShipping, s.cargoCompany);
+  const p2 = calcExactPriceForShipping(sh200);
 
-  const sh350 = calcShippingCost(weightGrams, 350, s.fastShipping, s.cargoCompany);
-  const p3 = calcExactPriceForShipping(sh350);
+  const sh300 = calcMarketplaceShippingCost(weightGrams, 300, s.fastShipping, s.cargoCompany);
+  const p3 = calcExactPriceForShipping(sh300);
 
-  if (p1 <= 199) recPrice = Math.ceil(p1);
-  else if (p2 >= 200 && p2 < 350) recPrice = Math.ceil(p2);
+  if (p1 <= 149) recPrice = Math.ceil(p1);
+  else if (p2 >= 150 && p2 < 300) recPrice = Math.ceil(p2);
   else recPrice = Math.ceil(p3);
 
-  if (recPrice > 199) {
-    const r199 = calcForPrice(199);
+  if (recPrice > 149) {
+    const r149 = calcForPrice(149);
     const rRec = calcForPrice(recPrice);
-    if (r199 && rRec && r199.netProfitAfterVat > rRec.netProfitAfterVat) {
-      recPrice = 199;
+    if (r149 && rRec && r149.netProfitAfterVat > rRec.netProfitAfterVat) {
+      recPrice = 149;
     }
   }
 
@@ -344,7 +345,7 @@ function calcPurchasePrice(
   purchasePrice: number, // KDV dahil alış fiyatı
   packagingCost: number, // Kütülama ücreti
   profitMarginPercent: number, // Hedef kâr %
-  commissionRate: number, // Trendyol komisyonu %
+  commissionRate: number, // İdefix komisyonu %
   paymentTermFee: number, // Vade farkı %
 ): {
   recommendedPrice: number;
@@ -360,7 +361,7 @@ function calcPurchasePrice(
   // Toplam maliyet (KDV hariç)
   const totalCostExVat = purchasePriceExVat + packagingCost;
   
-  // Trendyol kesintileri için oran
+  // İdefix kesintileri için oran
   const totalCutRate = (commissionRate + paymentTermFee) / 100;
   
   // Hedef: Net kâr = satış fiyatı (KDV hariç) × kâr %
@@ -414,15 +415,15 @@ function calcPurchasePrice(
 
 /** Bileşen içi kısayol: weightGrams + price + fastShipping + cargoCompany → KDV dahil kargo (TL) */
 function calcShipping(weightGrams: number, price: number, fastShipping: boolean, cargoCompany?: string): number {
-  return calcShippingCost(weightGrams, price, fastShipping, cargoCompany);
+  return calcMarketplaceShippingCost(weightGrams, price, fastShipping, cargoCompany);
 }
 
-function getActivePlatformFee(s: TrendyolSettings): number {
+function getActivePlatformFee(s: IdefixSettings): number {
   const base = s.useExpressPlatformFee ? s.platformFeeExpress : s.platformFeeBase;
   return base * 1.20; // KDV hariç girildiği için * 1.20 ile KDV dahil tutar bulunur
 }
 
-function calcProductionCost(weightGrams: number, s: TrendyolSettings): number {
+function calcProductionCost(weightGrams: number, s: IdefixSettings): number {
   const w = weightGrams * (1 + s.wastePercentage / 100);
   return (w / 1000) * s.filamentPricePerKg
        + w * s.electricityCostPerGram
@@ -437,7 +438,7 @@ function calcPriceForShippingComp(
   shipping: number,
   productionCost: number,
   weightGrams: number,
-  s: TrendyolSettings,
+  s: IdefixSettings,
   targetMargin: number
 ): number {
   const platformFee = getActivePlatformFee(s); // KDV dahil
@@ -446,7 +447,8 @@ function calcPriceForShippingComp(
   const returnCost = (productionCost + shipping + packagingCost) * (s.returnRate / 100);
   const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
 
-  const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
+  const isOrganic = s.organicSalesMode || (s.advertisingRate === 0);
+  const adRate = isOrganic ? 0 : (s.advertisingRate || 0) / 100;
   const totalCutRate = (s.commissionRate + s.paymentTermFee) / 100 + adRate;
 
   const wastedGrams = weightGrams * (1 + s.wastePercentage / 100);
@@ -470,48 +472,45 @@ function gramsToDesi(grams: number): number {
  * Önerilen satış fiyatını ve kâr dökümünü hesaplar.
  * Hedef: KDV sonrası net kâr = satış fiyatı × profitMargin %
  */
-function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number, s: TrendyolSettings, quantity: number = 1): PricingResult {
+function calcIdefixPrice(productionCostTotal: number, weightGramsTotal: number, s: IdefixSettings, quantity: number = 1): PricingResult {
   const platformFee = getActivePlatformFee(s);
   const packagingCost = s.packagingCost;
   const fixedCost = s.fixedCostPerOrder;
-  const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
+  const isOrganic = s.organicSalesMode || (s.advertisingRate === 0);
+  const adRate = isOrganic ? 0 : (s.advertisingRate || 0) / 100;
   const m = s.profitMargin / 100;
   const desi = gramsToDesi(weightGramsTotal);
 
-  // 1) Barem Altı (< 200 TL)
-  let priceUnder200 = Infinity;
-  let beUnder200 = Infinity;
-  if (desi < 10) {
-    const sh199 = calcShipping(weightGramsTotal, 199, s.fastShipping, s.cargoCompany);
-    const p1 = calcPriceForShippingComp(sh199, productionCostTotal, weightGramsTotal, s, m);
-    if (p1 <= 199) priceUnder200 = p1;
-    const be1 = calcPriceForShippingComp(sh199, productionCostTotal, weightGramsTotal, s, 0);
-    if (be1 <= 199) beUnder200 = be1;
-  }
+  // 1) Barem Desteği 1 (< 150 TL) -> 50 TL destek
+  let priceUnder150 = Infinity;
+  let beUnder150 = Infinity;
+  const sh149 = calcShipping(weightGramsTotal, 149, s.fastShipping, s.cargoCompany);
+  const p1 = calcPriceForShippingComp(sh149, productionCostTotal, weightGramsTotal, s, m);
+  if (p1 <= 149) priceUnder150 = p1;
+  const be1 = calcPriceForShippingComp(sh149, productionCostTotal, weightGramsTotal, s, 0);
+  if (be1 <= 149) beUnder150 = be1;
 
-  // 2) Barem Üstü (200-349 TL)
-  let price200to350 = Infinity;
-  let be200to350 = Infinity;
-  if (desi < 10) {
-    const sh250 = calcShipping(weightGramsTotal, 250, s.fastShipping, s.cargoCompany);
-    const p2 = calcPriceForShippingComp(sh250, productionCostTotal, weightGramsTotal, s, m);
-    if (p2 >= 200 && p2 < 350) price200to350 = p2;
-    const be2 = calcPriceForShippingComp(sh250, productionCostTotal, weightGramsTotal, s, 0);
-    if (be2 >= 200 && be2 < 350) be200to350 = be2;
-  }
+  // 2) Barem Desteği 2 (150 - 299 TL) -> 20 TL destek
+  let price150to300 = Infinity;
+  let be150to300 = Infinity;
+  const sh200 = calcShipping(weightGramsTotal, 200, s.fastShipping, s.cargoCompany);
+  const p2 = calcPriceForShippingComp(sh200, productionCostTotal, weightGramsTotal, s, m);
+  if (p2 >= 150 && p2 < 300) price150to300 = p2;
+  const be2 = calcPriceForShippingComp(sh200, productionCostTotal, weightGramsTotal, s, 0);
+  if (be2 >= 150 && be2 < 300) be150to300 = be2;
 
-  // 3) Standart Kargo (>= 350 TL)
-  const sh350 = calcShipping(weightGramsTotal, 350, s.fastShipping, s.cargoCompany);
-  const p3 = calcPriceForShippingComp(sh350, productionCostTotal, weightGramsTotal, s, m);
-  const be3 = calcPriceForShippingComp(sh350, productionCostTotal, weightGramsTotal, s, 0);
+  // 3) Standart Kargo (>= 300 TL) -> 0 TL destek
+  const sh300 = calcShipping(weightGramsTotal, 300, s.fastShipping, s.cargoCompany);
+  const p3 = calcPriceForShippingComp(sh300, productionCostTotal, weightGramsTotal, s, m);
+  const be3 = calcPriceForShippingComp(sh300, productionCostTotal, weightGramsTotal, s, 0);
 
   let exactTargetPrice = p3;
-  if (isFinite(priceUnder200)) exactTargetPrice = priceUnder200;
-  else if (isFinite(price200to350)) exactTargetPrice = price200to350;
+  if (isFinite(priceUnder150)) exactTargetPrice = priceUnder150;
+  else if (isFinite(price150to300)) exactTargetPrice = price150to300;
 
   let bePrice = be3;
-  if (isFinite(beUnder200)) bePrice = beUnder200;
-  else if (isFinite(be200to350)) bePrice = be200to350;
+  if (isFinite(beUnder150)) bePrice = beUnder150;
+  else if (isFinite(be150to300)) bePrice = be150to300;
 
   const targetPrice = Math.ceil(exactTargetPrice);
   let recommendedPrice = targetPrice;
@@ -586,7 +585,7 @@ function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number
   };
 }
 
-function calcAtFixedPrice(price: number, productionCostTotal: number, weightGramsTotal: number, s: TrendyolSettings): {
+function calcAtFixedPrice(price: number, productionCostTotal: number, weightGramsTotal: number, s: IdefixSettings): {
   shipping: number;
   netProfit: number;
   netProfitAfterVat: number;
@@ -600,7 +599,8 @@ function calcAtFixedPrice(price: number, productionCostTotal: number, weightGram
   const platformFee = getActivePlatformFee(s);
   const packagingCost = s.packagingCost;
   const fixedCost = s.fixedCostPerOrder;
-  const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
+  const isOrganic = s.organicSalesMode || (s.advertisingRate === 0);
+  const adRate = isOrganic ? 0 : (s.advertisingRate || 0) / 100;
   
   const shipping = calcShipping(weightGramsTotal, price, s.fastShipping, s.cargoCompany);
   const returnCost = (productionCostTotal + shipping + packagingCost) * (s.returnRate / 100);
@@ -663,8 +663,9 @@ interface BaremScenario {
 /**
  * Her barem bandı için KDV sonrası net kârı karşılaştırır.
  */
-function calcBaremOptimization(productionCost: number, weightGrams: number, s: TrendyolSettings, recommendedPrice: number): BaremScenario[] {
-  const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
+function calcBaremOptimization(productionCost: number, weightGrams: number, s: IdefixSettings, recommendedPrice: number): BaremScenario[] {
+  const isOrganic = s.organicSalesMode || (s.advertisingRate === 0);
+  const adRate = isOrganic ? 0 : (s.advertisingRate || 0) / 100;
   const totalCutRate = (s.commissionRate + s.paymentTermFee) / 100 + adRate;
   const vatNetRate = (1 - (s.commissionRate + s.paymentTermFee) / 100) / 6;
   const filamentCost = (weightGrams * (1 + s.wastePercentage / 100) / 1000) * s.filamentPricePerKg;
@@ -725,20 +726,20 @@ function calcBaremOptimization(productionCost: number, weightGrams: number, s: T
 
 // ─── BİLEŞEN ────────────────────────────────────────────────────────────────
 
-export function TrendyolCalculatorClient() {
+export function IdefixCalculatorClient() {
   const { toast } = useToast();
   const [mode, setMode] = useState<"production" | "purchase">("production");
-  const [settings, setSettings] = useState<TrendyolSettings>(() => {
+  const [settings, setSettings] = useState<IdefixSettings>(() => {
     if (typeof window !== "undefined") {
       try {
-        const saved = localStorage.getItem("trendyolSettings");
+        const saved = localStorage.getItem("idefixSettings");
         if (saved) {
           const parsed = JSON.parse(saved);
           const isOrg = parsed.organicSalesMode !== undefined
             ? Boolean(parsed.organicSalesMode)
             : false;
           return {
-            ...DEFAULT_TRENDYOL_SETTINGS,
+            ...DEFAULT_IDEFIX_SETTINGS,
             ...parsed,
             organicSalesMode: isOrg,
             advertisingRate: isOrg ? 0 : (parsed.advertisingRate ?? 8),
@@ -746,13 +747,13 @@ export function TrendyolCalculatorClient() {
         }
       } catch { /* ignore */ }
     }
-    return DEFAULT_TRENDYOL_SETTINGS;
+    return DEFAULT_IDEFIX_SETTINGS;
   });
   const [showSettings, setShowSettings] = useState(false);
   const [productName, setProductName] = useState("");
   const [weightGrams, setWeightGrams] = useState("");
   const [quantity, setQuantity] = useState("1");
-  const [products, setProducts] = useState<TrendyolProduct[]>([]);
+  const [products, setProducts] = useState<IdefixProduct[]>([]);
   // Ürün başına harici fiyat simülatörü: productId → fiyat string
   const [customPrices, setCustomPrices] = useState<Record<string, string>>({});
   const [catalogSuggestions, setCatalogSuggestions] = useState<Product[]>([]);
@@ -766,7 +767,7 @@ export function TrendyolCalculatorClient() {
     packagingCost: 0, // Kütülama ücreti
     weightGrams: 250, // Ürün gramajı (desi hesabı için)
     profitMargin: 30, // %
-    commissionRate: 16, // Trendyol komisyonu
+    commissionRate: 16, // İdefix komisyonu
     paymentTermFee: 3, // Vade farkı
     returnRate: 3, // Tahmini iade riski oranı %
     fixedCost: 0, // Sabit gider payı ₺
@@ -774,16 +775,17 @@ export function TrendyolCalculatorClient() {
     cargoCompany: "auto",
     customPrice: "", // Belirlenen özel satış fiyatı
   });
+
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("trendyolSettings");
+      const saved = localStorage.getItem("idefixSettings");
       if (saved) {
         const parsed = JSON.parse(saved);
         const isOrg = parsed.organicSalesMode !== undefined
             ? Boolean(parsed.organicSalesMode)
             : false;
         setSettings(prev => ({
-          ...DEFAULT_TRENDYOL_SETTINGS,
+          ...DEFAULT_IDEFIX_SETTINGS,
           ...parsed,
           organicSalesMode: isOrg,
           advertisingRate: isOrg ? 0 : (parsed.advertisingRate ?? 8),
@@ -791,9 +793,8 @@ export function TrendyolCalculatorClient() {
       }
     } catch { /* ignore */ }
   }, []);
-
   useEffect(() => {
-    const saved = localStorage.getItem("trendyolProducts");
+    const saved = localStorage.getItem("idefixProducts");
     if (saved) {
       try { setProducts(JSON.parse(saved)); }
       catch { /* ignore */ }
@@ -810,7 +811,7 @@ export function TrendyolCalculatorClient() {
     return () => document.removeEventListener("click", onDoc);
   }, []);
   useEffect(() => {
-    localStorage.setItem("trendyolProducts", JSON.stringify(products));
+    localStorage.setItem("idefixProducts", JSON.stringify(products));
   }, [products]);
 
   // Fetch product name suggestions from product catalog (Supabase)
@@ -848,14 +849,14 @@ export function TrendyolCalculatorClient() {
     setSuggestionsOpen(false);
   }
 
-  const upd = (patch: Partial<TrendyolSettings>) => setSettings(s => {
+  const upd = (patch: Partial<IdefixSettings>) => setSettings(s => {
     const next = { ...s, ...patch };
     if ('monthlyFixedExpense' in patch || 'monthlyOrderTarget' in patch) {
       const mo = (next.monthlyOrderTarget ?? 0) > 0 ? (next.monthlyOrderTarget ?? 1) : 1;
       next.fixedCostPerOrder = parseFloat(((next.monthlyFixedExpense ?? 0) / mo).toFixed(2));
     }
     try {
-      localStorage.setItem("trendyolSettings", JSON.stringify(next));
+      localStorage.setItem("idefixSettings", JSON.stringify(next));
     } catch { /* ignore */ }
     return next;
   });
@@ -871,7 +872,7 @@ export function TrendyolCalculatorClient() {
     };
   }
 
-  function getProductTypeFlags(product: TrendyolProduct) {
+  function getProductTypeFlags(product: IdefixProduct) {
     const fromName = detectProductTypeFlags(product.productName || "");
     return {
       isCandleholder: Boolean((product as any).is_candleholder || (product as any).isCandleholder || fromName.isCandleholder),
@@ -880,7 +881,7 @@ export function TrendyolCalculatorClient() {
     };
   }
 
-  function getProductionCostSuffix(product: TrendyolProduct) {
+  function getProductionCostSuffix(product: IdefixProduct) {
     const { isCandleholder, isKeychain, isSoapdish } = getProductTypeFlags(product);
     const extras: string[] = [];
     if (isKeychain) extras.push("Anahtar zinciri");
@@ -936,7 +937,7 @@ export function TrendyolCalculatorClient() {
     const pc = qty > 1
       ? calculateProductCost(p.weightGrams * qty, costSettingsForCalc, false, false, false).totalCost + extraPerUnit * qty
       : calculateProductCost(p.weightGrams, costSettingsForCalc, isCandleholder, isKeychain, isSoapdish).totalCost;
-    const pr = calcTrendyolPrice(pc, p.weightGrams * qty, settings, qty);
+    const pr = calcIdefixPrice(pc, p.weightGrams * qty, settings, qty);
 
     // Gerçek satış fiyatı girilmişse onu kullan
     const actualPriceStr = customPrices[p.id] ?? "";
@@ -965,7 +966,7 @@ export function TrendyolCalculatorClient() {
 
   // Ayar inputu yardımcısı
   const numInput = (
-    id: string, label: string, field: keyof TrendyolSettings,
+    id: string, label: string, field: keyof IdefixSettings,
     step = "1", note?: string
   ) => (
     <div>
@@ -985,7 +986,7 @@ export function TrendyolCalculatorClient() {
         <div className="container mx-auto px-4 lg:px-6 max-w-7xl py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Store className="w-5 h-5 text-orange-600" />
-            <h2 className="font-semibold">Trendyol Hesaplayıcı Modu</h2>
+            <h2 className="font-semibold">İdefix Hesaplayıcı Modu</h2>
           </div>
           <div className="flex gap-2">
             <button
@@ -1024,7 +1025,7 @@ export function TrendyolCalculatorClient() {
               <Store className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold">Trendyol Hesaplayıcı</h1>
+              <h1 className="text-2xl font-bold">İdefix Hesaplayıcı</h1>
               <p className="text-sm text-muted-foreground">Pazaryeri satış fiyatı hesaplama</p>
             </div>
           </div>
@@ -1038,7 +1039,7 @@ export function TrendyolCalculatorClient() {
               onChange={(e) => upd({ cargoCompany: e.target.value })}
               className="text-xs font-bold bg-transparent border-0 focus:outline-none focus:ring-0 cursor-pointer text-foreground"
             >
-              {CARGO_COMPANIES.map((c) => (
+              {MARKETPLACE_CARGO_COMPANIES.map((c) => (
                 <option key={c.id} value={c.id} className="bg-popover text-foreground">
                   {c.label}
                 </option>
@@ -1056,7 +1057,7 @@ export function TrendyolCalculatorClient() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2"><Package className="w-5 h-5" />Ürün Ekle</CardTitle>
-                <CardDescription>Trendyol'da satacağınız ürünleri ekleyin</CardDescription>
+                <CardDescription>İdefix'da satacağınız ürünleri ekleyin</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1149,7 +1150,7 @@ export function TrendyolCalculatorClient() {
                         ? costCalcTotal.totalCost + extraPerUnit * qty
                         : costCalcUnit.totalCost;
 
-                      const pr = calcTrendyolPrice(pc, product.weightGrams * qty, settings, qty);
+                      const pr = calcIdefixPrice(pc, product.weightGrams * qty, settings, qty);
 
                       // Gerçek satış fiyatı girilmişse tüm breakdown o fiyat üzerinden hesaplanır
                       const actualPriceStr = customPrices[product.id] ?? "";
@@ -1167,7 +1168,8 @@ export function TrendyolCalculatorClient() {
                         const shipping = activeSim!.shipping;
                         const commission = actualPriceVal * (settings.commissionRate / 100);
                         const paymentTermFee = actualPriceVal * (settings.paymentTermFee / 100);
-                        const advertisingCost = actualPriceVal * (settings.organicSalesMode ? 0 : settings.advertisingRate / 100);
+                        const isOrganic = settings.organicSalesMode || (settings.advertisingRate === 0);
+                        const advertisingCost = actualPriceVal * (isOrganic ? 0 : (settings.advertisingRate || 0) / 100);
                         const wastedGrams = product.weightGrams * qty * (1 + settings.wastePercentage / 100);
                         const filamentCostForVat = (wastedGrams / 1000) * settings.filamentPricePerKg;
                         const electricityCostForVat = wastedGrams * settings.electricityCostPerGram;
@@ -1648,7 +1650,7 @@ export function TrendyolCalculatorClient() {
                               <Row label="Sabit Gider" value={`₺${bd.fixedCost.toFixed(2)}`} />
                               <Row label={`İade Maliyeti (%${settings.returnRate})`} value={`₺${bd.returnCost.toFixed(2)}`} color="text-orange-600" />
                               <div className="border-t my-1" />
-                              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-1">Trendyol Kesintileri</p>
+                              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-1">İdefix Kesintileri</p>
                               <Row label={`Komisyon (%${settings.commissionRate})`} value={`−₺${bd.commission.toFixed(2)}`} color="text-red-600" />
                               <Row label={`Vade Farkı (%${settings.paymentTermFee})`} value={`−₺${bd.paymentTermFee.toFixed(2)}`} color="text-red-600" />
                               {!settings.organicSalesMode && (
@@ -1700,7 +1702,7 @@ export function TrendyolCalculatorClient() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
-                  <span className="flex items-center gap-2"><Settings className="w-5 h-5" />Trendyol Ayarları</span>
+                  <span className="flex items-center gap-2"><Settings className="w-5 h-5" />İdefix Ayarları</span>
                   <Button variant="ghost" size="sm" onClick={() => setShowSettings(v => !v)}>
                     {showSettings ? "Gizle" : "Düzenle"}
                   </Button>
@@ -1720,10 +1722,10 @@ export function TrendyolCalculatorClient() {
 
                   <div className="border-t" />
 
-                  {/* Trendyol */}
+                  {/* İdefix */}
                   <section className="space-y-3">
-                    <p className="text-sm font-semibold">Trendyol Maliyetleri</p>
-                    {numInput("t1", "Trendyol Komisyonu (%)", "commissionRate", "0.1", "Hakediş raporunda yazıyorsa o oranı gir")}
+                    <p className="text-sm font-semibold">İdefix Maliyetleri</p>
+                    {numInput("t1", "İdefix Komisyonu (%)", "commissionRate", "0.1", "Hakediş raporunda yazıyorsa o oranı gir")}
                     {numInput("t2", "Vade Farkı (%)", "paymentTermFee", "0.1", "Genellikle %3")}
 
                     {/* Platform Bedeli — Bugün Kargoda toggle */}
@@ -1788,7 +1790,7 @@ export function TrendyolCalculatorClient() {
                         onChange={(e) => upd({ cargoCompany: e.target.value })}
                         className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
                       >
-                        {CARGO_COMPANIES.map((c) => (
+                        {MARKETPLACE_CARGO_COMPANIES.map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.label}
                           </option>
@@ -1816,7 +1818,7 @@ export function TrendyolCalculatorClient() {
                           const isOrg = e.target.checked;
                           upd({
                             organicSalesMode: isOrg,
-                            advertisingRate: isOrg ? 0 : 8
+                            advertisingRate: isOrg ? 0 : (settings.advertisingRate || 8)
                           });
                         }} className="w-4 h-4" />
                       <Label htmlFor="organicMode" className="cursor-pointer text-green-700 font-semibold">🌱 Organik Satış (%0 reklam)</Label>
@@ -1887,15 +1889,15 @@ export function TrendyolCalculatorClient() {
                   <div className="border-t pt-2 space-y-2">
                     <Button size="sm" className="w-full bg-orange-500 hover:bg-orange-600 text-white"
                       onClick={() => {
-                        localStorage.setItem("trendyolSettings", JSON.stringify(settings));
+                        localStorage.setItem("idefixSettings", JSON.stringify(settings));
                         toast({ title: "✅ Ayarlar kaydedildi", description: "Bir sonraki ziyarette de geçerli olacak." });
                       }}>
                       💾 Kaydet
                     </Button>
                     <Button variant="outline" size="sm" className="w-full"
                       onClick={() => {
-                        setSettings(DEFAULT_TRENDYOL_SETTINGS);
-                        localStorage.setItem("trendyolSettings", JSON.stringify(DEFAULT_TRENDYOL_SETTINGS));
+                        setSettings(DEFAULT_IDEFIX_SETTINGS);
+                        localStorage.setItem("idefixSettings", JSON.stringify(DEFAULT_IDEFIX_SETTINGS));
                         toast({ title: "Varsayılan ayarlar yüklendi" });
                       }}>
                       Varsayılana Dön
@@ -1968,7 +1970,7 @@ export function TrendyolCalculatorClient() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold">Alım Hesaplayıcı & Kar Marjı Simülatörü</h1>
-                <p className="text-sm text-muted-foreground">Tedarikçiden alınan ürünlerin Trendyol kargo baremleri, komisyon ve KDV dahil detaylı kâr dökümü</p>
+                <p className="text-sm text-muted-foreground">Tedarikçiden alınan ürünlerin İdefix kargo baremleri, komisyon ve KDV dahil detaylı kâr dökümü</p>
               </div>
             </div>
 
@@ -2034,7 +2036,7 @@ export function TrendyolCalculatorClient() {
                       }
                       placeholder="250"
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Trendyol Desi hesabı ({gramsToDesi(purchaseSettings.weightGrams || 100)} Desi)</p>
+                    <p className="text-xs text-muted-foreground mt-1">İdefix Desi hesabı ({gramsToDesi(purchaseSettings.weightGrams || 100)} Desi)</p>
                   </div>
                 </div>
 
@@ -2058,7 +2060,7 @@ export function TrendyolCalculatorClient() {
                     <p className="text-xs text-muted-foreground mt-1">Net hedef kâr marjı (fiyat üzerinden)</p>
                   </div>
                   <div>
-                    <Label htmlFor="commission">Trendyol Komisyon Oranı %</Label>
+                    <Label htmlFor="commission">İdefix Komisyon Oranı %</Label>
                     <Input
                       id="commission"
                       type="number"
@@ -2073,7 +2075,7 @@ export function TrendyolCalculatorClient() {
                         }))
                       }
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Trendyol kategori komisyonu</p>
+                    <p className="text-xs text-muted-foreground mt-1">İdefix kategori komisyonu</p>
                   </div>
                   <div>
                     <Label htmlFor="return-rate">Tahmini İade Oranı %</Label>
@@ -2120,7 +2122,7 @@ export function TrendyolCalculatorClient() {
                       onChange={(e) => upd({ cargoCompany: e.target.value })}
                       className="w-full h-9 mt-1 px-3 rounded-lg border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
                     >
-                      {CARGO_COMPANIES.map((c) => (
+                      {MARKETPLACE_CARGO_COMPANIES.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.label}
                         </option>
@@ -2198,7 +2200,7 @@ export function TrendyolCalculatorClient() {
                   <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-muted/40 rounded-xl border border-border">
                     <div className="flex items-center gap-2">
                       <Package className="w-5 h-5 text-emerald-600" />
-                      <span className="text-sm font-semibold">Trendyol Kargo Barem Seviyesi:</span>
+                      <span className="text-sm font-semibold">İdefix Kargo Barem Seviyesi:</span>
                       <span className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${activeBd.baremBadgeClass}`}>
                         {activeBd.baremLabel}
                       </span>
@@ -2305,10 +2307,10 @@ export function TrendyolCalculatorClient() {
                       </div>
 
                       <div className="bg-muted/30 p-3 rounded-lg space-y-2">
-                        <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Trendyol Operasyon & Kesinti Kalemleri</p>
+                        <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">İdefix Operasyon & Kesinti Kalemleri</p>
                         <Row label={`🚚 Kargo Ücreti (${activeBd.baremLabel})`} value={`₺${activeBd.shippingIncVat.toFixed(2)}`} color="text-amber-600" bold />
                         <Row label={`🚀 Platform Hizmet Bedeli (${settings.useExpressPlatformFee ? "Hızlı" : "Standart"})`} value={`₺${activeBd.platformFeeIncVat.toFixed(2)}`} />
-                        <Row label={`🏷️ Trendyol Komisyonu (%${purchaseSettings.commissionRate})`} value={`−₺${activeBd.commission.toFixed(2)}`} color="text-red-600" />
+                        <Row label={`🏷️ İdefix Komisyonu (%${purchaseSettings.commissionRate})`} value={`−₺${activeBd.commission.toFixed(2)}`} color="text-red-600" />
                         <Row label={`💳 Vade Farkı / Kesinti (%${purchaseSettings.paymentTermFee})`} value={`−₺${activeBd.paymentTerm.toFixed(2)}`} color="text-red-600" />
                         {activeBd.advertising > 0 && (
                           <Row label={`📢 Reklam Gideri (%${settings.advertisingRate})`} value={`−₺${activeBd.advertising.toFixed(2)}`} color="text-orange-600" />

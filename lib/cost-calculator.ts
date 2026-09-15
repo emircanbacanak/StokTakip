@@ -345,11 +345,11 @@ export function kilogramsToGrams(kilograms: number): number {
  * Varsayılan maliyet ayarları
  */
 export const DEFAULT_COST_SETTINGS: Omit<CostSettings, "id" | "updated_at" | "updated_by"> = {
-  filament_price_per_kg: 650.0,
+  filament_price_per_kg: 500.0,
   filament_enabled: true,
-  electricity_cost_per_gram: 0.1,
+  electricity_cost_per_gram: 0.05,
   electricity_enabled: true,
-  waste_percentage: 10.0,
+  waste_percentage: 0,
   waste_enabled: true,
   depreciation_cost_per_gram: 0.05,
   depreciation_enabled: true,

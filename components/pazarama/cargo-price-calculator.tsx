@@ -5,25 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Truck, Package, ShieldCheck } from "lucide-react";
+import { Truck, Package, Calculator, CheckCircle2, ShieldCheck, Zap } from "lucide-react";
 import {
-  CARGO_COMPANIES,
-  calcShippingCost,
-} from "@/lib/trendyol-cargo";
-
-// 1-10 Desi Standart Tarife (KDV Hariç)
-const TRENDYOL_DESI_1_10: Record<number, Record<string, number>> = {
-  1:  { "TEX": 77.54, "PTT": 77.54, "Aras": 83.93, "Sürat": 89.71, "KolayGelsin": 91.99, "DHL": 92.99, "Yurtiçi": 112.77 },
-  2:  { "TEX": 77.54, "PTT": 77.54, "Aras": 83.93, "Sürat": 89.71, "KolayGelsin": 91.99, "DHL": 92.99, "Yurtiçi": 112.77 },
-  3:  { "TEX": 93.63, "PTT": 96.00, "Aras": 95.12, "Sürat": 99.96, "KolayGelsin": 101.99, "DHL": 103.99, "Yurtiçi": 120.56 },
-  4:  { "TEX": 101.46, "PTT": 96.00, "Aras": 103.68, "Sürat": 109.30, "KolayGelsin": 112.99, "DHL": 116.99, "Yurtiçi": 123.15 },
-  5:  { "TEX": 107.98, "PTT": 100.55, "Aras": 111.17, "Sürat": 114.94, "KolayGelsin": 121.99, "DHL": 129.99, "Yurtiçi": 142.91 },
-  6:  { "TEX": 118.30, "PTT": 106.83, "Aras": 121.12, "Sürat": 126.28, "KolayGelsin": 131.99, "DHL": 141.99, "Yurtiçi": 149.82 },
-  7:  { "TEX": 125.66, "PTT": 113.15, "Aras": 128.46, "Sürat": 134.85, "KolayGelsin": 140.99, "DHL": 149.99, "Yurtiçi": 169.44 },
-  8:  { "TEX": 134.21, "PTT": 125.73, "Aras": 137.05, "Sürat": 143.29, "KolayGelsin": 150.99, "DHL": 159.99, "Yurtiçi": 175.96 },
-  9:  { "TEX": 142.42, "PTT": 138.34, "Aras": 144.91, "Sürat": 151.87, "KolayGelsin": 159.99, "DHL": 169.99, "Yurtiçi": 186.86 },
-  10: { "TEX": 153.47, "PTT": 157.26, "Aras": 153.48, "Sürat": 160.43, "KolayGelsin": 170.99, "DHL": 176.99, "Yurtiçi": 195.12 },
-};
+  PAZARAMA_CARGO_COMPANIES,
+  calcPazaramaShippingCost,
+  PAZARAMA_BAREM_TABLE,
+  PAZARAMA_DESI_TABLE,
+  KDV_RATE,
+} from "@/lib/pazarama-cargo";
 
 export function CargoPriceCalculator() {
   const [orderAmount, setOrderAmount] = useState<string>("180");
@@ -32,7 +21,7 @@ export function CargoPriceCalculator() {
   const [depth, setDepth] = useState<string>("15");
   const [weightKg, setWeightKg] = useState<string>("1");
   const [selectedCompany, setSelectedCompany] = useState<string>("auto");
-  const [fastShipping, setFastShipping] = useState<boolean>(true);
+  const [isSameDay, setIsSameDay] = useState<boolean>(true);
 
   const desi = useMemo(() => {
     const w = parseFloat(width) || 0;
@@ -50,22 +39,21 @@ export function CargoPriceCalculator() {
   const amount = parseFloat(orderAmount) || 0;
 
   const cost = useMemo(() => {
-    return calcShippingCost(effectiveDesi * 1000, amount, fastShipping, selectedCompany);
-  }, [effectiveDesi, amount, fastShipping, selectedCompany]);
+    return calcPazaramaShippingCost(effectiveDesi * 1000, amount, isSameDay, selectedCompany);
+  }, [effectiveDesi, amount, isSameDay, selectedCompany]);
 
-  const isBarem = amount < 350;
+  const isBarem = amount < 300;
 
   return (
     <div className="space-y-6">
-      {/* 1. Hesaplayıcı Kartı */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Truck className="w-5 h-5 text-orange-500" />
-            Trendyol Anlaşmalı Kargo ve Barem Hesaplayıcı
+            <Truck className="w-5 h-5 text-blue-500" />
+            Pazarama Anlaşmalı Kargo ve Barem Hesaplayıcı
           </CardTitle>
           <CardDescription>
-            Sipariş tutarı ve desi değerine göre anlaşmalı kargo maliyetlerinizi hesaplayın.
+            Aynı Gün (0 gün) ve normal terminli kargo barem maliyetlerinizi hesaplayın.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -86,7 +74,7 @@ export function CargoPriceCalculator() {
                 onChange={(e) => setSelectedCompany(e.target.value)}
                 className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                {CARGO_COMPANIES.map((c) => (
+                {PAZARAMA_CARGO_COMPANIES.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label}
                   </option>
@@ -102,16 +90,16 @@ export function CargoPriceCalculator() {
                 placeholder="Örn: 1"
               />
             </div>
-            <div>
-              <Label className="text-xs font-semibold">Termin Süresi</Label>
-              <select
-                value={fastShipping ? "1" : "2"}
-                onChange={(e) => setFastShipping(e.target.value === "1")}
-                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="1">⚡ 0 - 1 Gün (Avantajlı Barem)</option>
-                <option value="2">🐢 2+ Gün (Standart Barem)</option>
-              </select>
+            <div className="flex flex-col justify-end">
+              <label className="flex items-center gap-2 p-2.5 border rounded-lg cursor-pointer bg-card hover:bg-muted/40 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={isSameDay}
+                  onChange={(e) => setIsSameDay(e.target.checked)}
+                  className="w-4 h-4 rounded text-blue-600"
+                />
+                <span className="text-xs font-semibold">⚡ Aynı Gün (0 Gün) Gönderi</span>
+              </label>
             </div>
           </div>
 
@@ -147,38 +135,42 @@ export function CargoPriceCalculator() {
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <Badge variant={isBarem ? "default" : "secondary"}>
-                  {isBarem ? "🟢 Şartlı Kargo (350 TL Altı Barem Destekli)" : "📦 Standart Desi Tarifesi"}
+                  {isBarem
+                    ? isSameDay
+                      ? "🟢 Aynı Gün Barem Destekli (<300 TL)"
+                      : "🔵 Normal Barem Destekli (<300 TL)"
+                    : "📦 Standart Desi Tarifesi"}
                 </Badge>
                 <span className="text-xs text-muted-foreground">Hesaplanan: {effectiveDesi} Desi</span>
               </div>
               <p className="text-xs text-muted-foreground">
                 {isBarem
-                  ? "Sipariş 350 TL altında olduğu için Trendyol barem desteği uygulanır (Kaç desi olduğu önemsiz sabit barem fiyatı)."
-                  : "Sipariş 350 TL üzerinde olduğu için Trendyol standart desi tarifesi üzerinden faturalandırılır."}
+                  ? `Sipariş 300 TL altında olduğu için Pazarama ${isSameDay ? "Aynı Gün (0 Gün)" : "Normal"} barem desteği uygulanır (Kaç desi olduğu önemsiz sabit barem fiyatı).`
+                  : "Sipariş 300 TL üzerinde olduğu için Pazarama anlaşmalı desi tarifesi uygulanır."}
               </p>
             </div>
             <div className="text-right shrink-0">
               <div className="text-xs text-muted-foreground">KDV Dahil Kargo Maliyeti</div>
-              <div className="text-2xl font-black text-orange-600 dark:text-orange-400">
+              <div className="text-2xl font-black text-blue-600 dark:text-blue-400">
                 ₺{cost.toFixed(2)}
               </div>
               <div className="text-[11px] text-muted-foreground">
-                KDV Hariç: ₺{(cost / 1.20).toFixed(2)}
+                KDV Hariç: ₺{(cost / (1 + KDV_RATE)).toFixed(2)}
               </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* 2. Barem Destek Tablosu */}
+      {/* Aynı Gün Barem Destek Tablosu */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-emerald-500" />
-            Trendyol Şartlı Kargo Barem Destek Tablosu (350 TL Altı, KDV Hariç)
+            <Zap className="w-5 h-5 text-emerald-500" />
+            Pazarama Aynı Gün (0 Gün) Barem Destek Tablosu (KDV Hariç)
           </CardTitle>
           <CardDescription>
-            350 TL altı siparişlerde geçerli olan avantajlı sabit barem fiyatları (0-1 gün termin)
+            Teslimat şablonunda Aynı Gün seçili ve süresinde kargolanan siparişler için indirimli fiyatlar
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -187,7 +179,7 @@ export function CargoPriceCalculator() {
               <thead>
                 <tr className="border-b bg-muted/50 font-semibold">
                   <th className="py-2.5 px-3">Sepet Aralığı</th>
-                  <th className="py-2.5 px-3">TEX / PTT</th>
+                  <th className="py-2.5 px-3">PTT Kargo</th>
                   <th className="py-2.5 px-3">Aras Kargo</th>
                   <th className="py-2.5 px-3">Sürat Kargo</th>
                   <th className="py-2.5 px-3">Kolay Gelsin</th>
@@ -197,8 +189,8 @@ export function CargoPriceCalculator() {
               </thead>
               <tbody>
                 <tr className="border-b hover:bg-muted/30">
-                  <td className="py-2.5 px-3 font-semibold text-emerald-600">0 - 199,99 TL</td>
-                  <td className="py-2.5 px-3 font-bold text-emerald-600">38,74 TL</td>
+                  <td className="py-2.5 px-3 font-semibold text-emerald-600">0 - 149,99 TL</td>
+                  <td className="py-2.5 px-3 font-bold text-emerald-600">34,16 TL</td>
                   <td className="py-2.5 px-3">48,33 TL</td>
                   <td className="py-2.5 px-3">54,58 TL</td>
                   <td className="py-2.5 px-3">55,83 TL</td>
@@ -206,8 +198,8 @@ export function CargoPriceCalculator() {
                   <td className="py-2.5 px-3">83,33 TL</td>
                 </tr>
                 <tr className="border-b hover:bg-muted/30">
-                  <td className="py-2.5 px-3 font-semibold text-blue-600">200 - 349,99 TL</td>
-                  <td className="py-2.5 px-3 font-bold text-blue-600">70,41 TL</td>
+                  <td className="py-2.5 px-3 font-semibold text-blue-600">150 - 300 TL</td>
+                  <td className="py-2.5 px-3 font-bold text-emerald-600">65,83 TL</td>
                   <td className="py-2.5 px-3">79,16 TL</td>
                   <td className="py-2.5 px-3">85,41 TL</td>
                   <td className="py-2.5 px-3">86,66 TL</td>
@@ -220,15 +212,15 @@ export function CargoPriceCalculator() {
         </CardContent>
       </Card>
 
-      {/* 3. Standart Desi Tablosu */}
+      {/* Aynı Gün Değilse Tablosu */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <Package className="w-5 h-5 text-indigo-500" />
-            Trendyol Özel Anlaşmalı Kargo Fiyat Listesi (1 - 10 Desi, KDV Hariç)
+            <ShieldCheck className="w-5 h-5 text-amber-500" />
+            Pazarama Aynı Gün Değilse Barem Destek Tablosu (KDV Hariç)
           </CardTitle>
           <CardDescription>
-            350 TL ve üzeri siparişler için geçerli standart desi tarifesi
+            Termini 1 günden fazla olan siparişler için geçerli barem fiyatları
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -236,33 +228,34 @@ export function CargoPriceCalculator() {
             <table className="w-full text-xs text-left">
               <thead>
                 <tr className="border-b bg-muted/50 font-semibold">
-                  <th className="py-2 px-3">Desi</th>
-                  <th className="py-2 px-3">TEX</th>
-                  <th className="py-2 px-3">PTT Kargo</th>
-                  <th className="py-2 px-3">Aras Kargo</th>
-                  <th className="py-2 px-3">Sürat Kargo</th>
-                  <th className="py-2 px-3">Kolay Gelsin</th>
-                  <th className="py-2 px-3">DHL eCommerce</th>
-                  <th className="py-2 px-3">Yurtiçi Kargo</th>
+                  <th className="py-2.5 px-3">Sepet Aralığı</th>
+                  <th className="py-2.5 px-3">PTT Kargo</th>
+                  <th className="py-2.5 px-3">Aras Kargo</th>
+                  <th className="py-2.5 px-3">Sürat Kargo</th>
+                  <th className="py-2.5 px-3">Kolay Gelsin</th>
+                  <th className="py-2.5 px-3">DHL eCommerce</th>
+                  <th className="py-2.5 px-3">Yurtiçi Kargo</th>
                 </tr>
               </thead>
               <tbody>
-                {Object.keys(TRENDYOL_DESI_1_10).map((desiKey) => {
-                  const d = Number(desiKey);
-                  const row = TRENDYOL_DESI_1_10[d];
-                  return (
-                    <tr key={d} className="border-b hover:bg-muted/30">
-                      <td className="py-2 px-3 font-bold">{d} Desi</td>
-                      <td className="py-2 px-3 font-semibold text-emerald-600">{row.TEX.toFixed(2)} TL</td>
-                      <td className="py-2 px-3">{row.PTT.toFixed(2)} TL</td>
-                      <td className="py-2 px-3">{row.Aras.toFixed(2)} TL</td>
-                      <td className="py-2 px-3">{row.Sürat.toFixed(2)} TL</td>
-                      <td className="py-2 px-3">{row.KolayGelsin.toFixed(2)} TL</td>
-                      <td className="py-2 px-3">{row.DHL.toFixed(2)} TL</td>
-                      <td className="py-2 px-3">{row.Yurtiçi.toFixed(2)} TL</td>
-                    </tr>
-                  );
-                })}
+                <tr className="border-b hover:bg-muted/30">
+                  <td className="py-2.5 px-3 font-semibold text-emerald-600">0 - 149,99 TL</td>
+                  <td className="py-2.5 px-3 font-bold">68,74 TL</td>
+                  <td className="py-2.5 px-3">80,83 TL</td>
+                  <td className="py-2.5 px-3">87,08 TL</td>
+                  <td className="py-2.5 px-3">88,33 TL</td>
+                  <td className="py-2.5 px-3">89,58 TL</td>
+                  <td className="py-2.5 px-3">114,16 TL</td>
+                </tr>
+                <tr className="border-b hover:bg-muted/30">
+                  <td className="py-2.5 px-3 font-semibold text-blue-600">150 - 300 TL</td>
+                  <td className="py-2.5 px-3 font-bold">74,16 TL</td>
+                  <td className="py-2.5 px-3">86,24 TL</td>
+                  <td className="py-2.5 px-3">92,49 TL</td>
+                  <td className="py-2.5 px-3">93,74 TL</td>
+                  <td className="py-2.5 px-3">94,99 TL</td>
+                  <td className="py-2.5 px-3">119,16 TL</td>
+                </tr>
               </tbody>
             </table>
           </div>

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { FileText, Calendar, User, Package, AlertCircle, Store, Settings, Calculator, TrendingUp, ShoppingBag, Truck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-interface TrendyolProduct {
+interface HepsiburadaProduct {
   id: string;
   productName: string;
   weightGrams: number;
@@ -20,14 +20,14 @@ interface TrendyolProduct {
 }
 
 
-interface TrendyolSettings {
+interface HepsiburadaSettings {
   // Üretim Maliyetleri
   filamentPricePerKg: number;
   electricityCostPerGram: number;
   depreciationCostPerGram: number;
   wastePercentage: number;
 
-  // Trendyol Maliyetleri
+  // Hepsiburada Maliyetleri
   commissionRate: number;
   paymentTermFee: number;
   packagingCost: number;
@@ -37,7 +37,7 @@ interface TrendyolSettings {
 
   // Kargo
   fastShipping: boolean;        // true = Tablo 1 (hızlı), false = Tablo 2 (yavaş)
-  cargoCompany?: string;        // "auto" | "TEX/PTT" | "Aras" | "Sürat" | "KolayGelsin" | "DHL" | "Yurtiçi"
+  cargoCompany?: string;        // "auto" | "HepsiJET" | "Aras" | "Sürat" | "PTT" | "Yurtiçi" | "KolayGelsin"
 
   // Profesyonel Maliyetler
   advertisingRate: number;      // % — satış fiyatı üzerinden
@@ -56,7 +56,7 @@ interface TrendyolSettings {
   profitMargin: number;         // % — net kâr / satış fiyatı (fiyat üzerinden)
 }
 
-const DEFAULT_TRENDYOL_SETTINGS: TrendyolSettings = {
+const DEFAULT_HEPSIBURADA_SETTINGS: HepsiburadaSettings = {
   filamentPricePerKg: 500,
   electricityCostPerGram: 0.05,
   depreciationCostPerGram: 0.05,
@@ -88,11 +88,11 @@ const DEFAULT_TRENDYOL_SETTINGS: TrendyolSettings = {
 
 // ─── HESAPLAMA MANTIĞI ──────────────────────────────────────────────────────
 //
-// Trendyol gerçek para akışı:
+// Hepsiburada gerçek para akışı:
 //
 //   Alıcı → KDV dahil satış fiyatını öder (P)
 //
-//   Trendyol kesintileri (P'nin tamamı üzerinden, KDV dahil):
+//   Hepsiburada kesintileri (P'nin tamamı üzerinden, KDV dahil):
 //     - Komisyon  = P × komisyon%
 //     - Vade farkı = P × vade%
 //     - Platform hizmet bedeli = sabit TL (KDV dahil)
@@ -156,14 +156,14 @@ interface PricingResult {
 }
 
 // ─── KARGO SERVİSİ ───────────────────────────────────────────────────────────
-// Tüm kargo iş kuralları lib/trendyol-cargo.ts dosyasında tanımlıdır.
+// Tüm kargo iş kuralları lib/hepsiburada-cargo.ts dosyasında tanımlıdır.
 // Bu bileşen yalnızca calcShippingCost ve checkPriceOptimization'ı kullanır.
 import {
   calcShippingCost,
   checkPriceOptimization,
-  CARGO_COMPANIES,
+  HEPSIBURADA_COMPANIES,
   type NetProfitInput,
-} from "@/lib/trendyol-cargo";
+} from "@/lib/hepsiburada-cargo";
 import { calculateProductCost, DEFAULT_COST_SETTINGS } from "@/lib/cost-calculator";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { Product } from "@/lib/types/database";
@@ -178,7 +178,7 @@ function calcDetailedPurchasePrice(
   paymentTermFeePercent: number,
   returnRatePercent: number,
   fixedCostPerOrder: number,
-  s: TrendyolSettings
+  s: HepsiburadaSettings
 ) {
   const KDV_RATE = 0.20;
 
@@ -199,7 +199,7 @@ function calcDetailedPurchasePrice(
 
   const calcForPrice = (P: number) => {
     if (P <= 0 || !isFinite(P)) return null;
-    const shippingIncVat = calcShippingCost(weightGrams, P, s.fastShipping, s.cargoCompany);
+    const shippingIncVat = calcShippingCost(weightGrams, P, s.fastShipping);
     const shippingExVat = shippingIncVat / (1 + KDV_RATE);
     const shippingVat = shippingIncVat - shippingExVat;
 
@@ -278,24 +278,31 @@ function calcDetailedPurchasePrice(
   };
 
   let recPrice = 200;
-  const sh199 = calcShippingCost(weightGrams, 199, s.fastShipping, s.cargoCompany);
+  const sh199 = calcShippingCost(weightGrams, 199, s.fastShipping);
   const p1 = calcExactPriceForShipping(sh199);
 
-  const sh250 = calcShippingCost(weightGrams, 250, s.fastShipping, s.cargoCompany);
-  const p2 = calcExactPriceForShipping(sh250);
+  const sh300 = calcShippingCost(weightGrams, 300, s.fastShipping);
+  const p2 = calcExactPriceForShipping(sh300);
 
-  const sh350 = calcShippingCost(weightGrams, 350, s.fastShipping, s.cargoCompany);
-  const p3 = calcExactPriceForShipping(sh350);
+  const sh450 = calcShippingCost(weightGrams, 450, s.fastShipping);
+  const p3 = calcExactPriceForShipping(sh450);
 
-  if (p1 <= 199) recPrice = Math.ceil(p1);
-  else if (p2 >= 200 && p2 < 350) recPrice = Math.ceil(p2);
+  if (p1 <= 200) recPrice = Math.ceil(p1);
+  else if (p2 > 200 && p2 < 400) recPrice = Math.ceil(p2);
   else recPrice = Math.ceil(p3);
 
-  if (recPrice > 199) {
-    const r199 = calcForPrice(199);
+  // Kargo barem sıçrama optimizasyonu (199.90 TL ve 399.90 TL)
+  if (recPrice > 199 && recPrice <= 230) {
+    const r199 = calcForPrice(199.90);
     const rRec = calcForPrice(recPrice);
     if (r199 && rRec && r199.netProfitAfterVat > rRec.netProfitAfterVat) {
-      recPrice = 199;
+      recPrice = 199.90;
+    }
+  } else if (recPrice >= 400 && recPrice <= 430) {
+    const r399 = calcForPrice(399.90);
+    const rRec = calcForPrice(recPrice);
+    if (r399 && rRec && r399.netProfitAfterVat > rRec.netProfitAfterVat) {
+      recPrice = 399.90;
     }
   }
 
@@ -344,7 +351,7 @@ function calcPurchasePrice(
   purchasePrice: number, // KDV dahil alış fiyatı
   packagingCost: number, // Kütülama ücreti
   profitMarginPercent: number, // Hedef kâr %
-  commissionRate: number, // Trendyol komisyonu %
+  commissionRate: number, // Hepsiburada komisyonu %
   paymentTermFee: number, // Vade farkı %
 ): {
   recommendedPrice: number;
@@ -360,7 +367,7 @@ function calcPurchasePrice(
   // Toplam maliyet (KDV hariç)
   const totalCostExVat = purchasePriceExVat + packagingCost;
   
-  // Trendyol kesintileri için oran
+  // Hepsiburada kesintileri için oran
   const totalCutRate = (commissionRate + paymentTermFee) / 100;
   
   // Hedef: Net kâr = satış fiyatı (KDV hariç) × kâr %
@@ -414,15 +421,15 @@ function calcPurchasePrice(
 
 /** Bileşen içi kısayol: weightGrams + price + fastShipping + cargoCompany → KDV dahil kargo (TL) */
 function calcShipping(weightGrams: number, price: number, fastShipping: boolean, cargoCompany?: string): number {
-  return calcShippingCost(weightGrams, price, fastShipping, cargoCompany);
+  return calcShippingCost(weightGrams, price, fastShipping);
 }
 
-function getActivePlatformFee(s: TrendyolSettings): number {
+function getActivePlatformFee(s: HepsiburadaSettings): number {
   const base = s.useExpressPlatformFee ? s.platformFeeExpress : s.platformFeeBase;
   return base * 1.20; // KDV hariç girildiği için * 1.20 ile KDV dahil tutar bulunur
 }
 
-function calcProductionCost(weightGrams: number, s: TrendyolSettings): number {
+function calcProductionCost(weightGrams: number, s: HepsiburadaSettings): number {
   const w = weightGrams * (1 + s.wastePercentage / 100);
   return (w / 1000) * s.filamentPricePerKg
        + w * s.electricityCostPerGram
@@ -437,7 +444,7 @@ function calcPriceForShippingComp(
   shipping: number,
   productionCost: number,
   weightGrams: number,
-  s: TrendyolSettings,
+  s: HepsiburadaSettings,
   targetMargin: number
 ): number {
   const platformFee = getActivePlatformFee(s); // KDV dahil
@@ -470,7 +477,7 @@ function gramsToDesi(grams: number): number {
  * Önerilen satış fiyatını ve kâr dökümünü hesaplar.
  * Hedef: KDV sonrası net kâr = satış fiyatı × profitMargin %
  */
-function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number, s: TrendyolSettings, quantity: number = 1): PricingResult {
+function calcHepsiburadaPrice(productionCostTotal: number, weightGramsTotal: number, s: HepsiburadaSettings, quantity: number = 1): PricingResult {
   const platformFee = getActivePlatformFee(s);
   const packagingCost = s.packagingCost;
   const fixedCost = s.fixedCostPerOrder;
@@ -482,7 +489,7 @@ function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number
   let priceUnder200 = Infinity;
   let beUnder200 = Infinity;
   if (desi < 10) {
-    const sh199 = calcShipping(weightGramsTotal, 199, s.fastShipping, s.cargoCompany);
+    const sh199 = calcShipping(weightGramsTotal, 199, s.fastShipping);
     const p1 = calcPriceForShippingComp(sh199, productionCostTotal, weightGramsTotal, s, m);
     if (p1 <= 199) priceUnder200 = p1;
     const be1 = calcPriceForShippingComp(sh199, productionCostTotal, weightGramsTotal, s, 0);
@@ -493,7 +500,7 @@ function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number
   let price200to350 = Infinity;
   let be200to350 = Infinity;
   if (desi < 10) {
-    const sh250 = calcShipping(weightGramsTotal, 250, s.fastShipping, s.cargoCompany);
+    const sh250 = calcShipping(weightGramsTotal, 250, s.fastShipping);
     const p2 = calcPriceForShippingComp(sh250, productionCostTotal, weightGramsTotal, s, m);
     if (p2 >= 200 && p2 < 350) price200to350 = p2;
     const be2 = calcPriceForShippingComp(sh250, productionCostTotal, weightGramsTotal, s, 0);
@@ -501,7 +508,7 @@ function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number
   }
 
   // 3) Standart Kargo (>= 350 TL)
-  const sh350 = calcShipping(weightGramsTotal, 350, s.fastShipping, s.cargoCompany);
+  const sh350 = calcShipping(weightGramsTotal, 350, s.fastShipping);
   const p3 = calcPriceForShippingComp(sh350, productionCostTotal, weightGramsTotal, s, m);
   const be3 = calcPriceForShippingComp(sh350, productionCostTotal, weightGramsTotal, s, 0);
 
@@ -586,7 +593,7 @@ function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number
   };
 }
 
-function calcAtFixedPrice(price: number, productionCostTotal: number, weightGramsTotal: number, s: TrendyolSettings): {
+function calcAtFixedPrice(price: number, productionCostTotal: number, weightGramsTotal: number, s: HepsiburadaSettings): {
   shipping: number;
   netProfit: number;
   netProfitAfterVat: number;
@@ -602,7 +609,7 @@ function calcAtFixedPrice(price: number, productionCostTotal: number, weightGram
   const fixedCost = s.fixedCostPerOrder;
   const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
   
-  const shipping = calcShipping(weightGramsTotal, price, s.fastShipping, s.cargoCompany);
+  const shipping = calcShipping(weightGramsTotal, price, s.fastShipping);
   const returnCost = (productionCostTotal + shipping + packagingCost) * (s.returnRate / 100);
   const baseCost = productionCostTotal + shipping + packagingCost + platformFee + fixedCost + returnCost;
   
@@ -663,7 +670,7 @@ interface BaremScenario {
 /**
  * Her barem bandı için KDV sonrası net kârı karşılaştırır.
  */
-function calcBaremOptimization(productionCost: number, weightGrams: number, s: TrendyolSettings, recommendedPrice: number): BaremScenario[] {
+function calcBaremOptimization(productionCost: number, weightGrams: number, s: HepsiburadaSettings, recommendedPrice: number): BaremScenario[] {
   const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
   const totalCutRate = (s.commissionRate + s.paymentTermFee) / 100 + adRate;
   const vatNetRate = (1 - (s.commissionRate + s.paymentTermFee) / 100) / 6;
@@ -680,7 +687,7 @@ function calcBaremOptimization(productionCost: number, weightGrams: number, s: T
 
   // Başabaş fiyatı: KDV sonrası kâr = 0
   const calcExactPrice = (shippingPrice: number) => {
-    const shipping = calcShipping(weightGrams, shippingPrice, s.fastShipping, s.cargoCompany);
+    const shipping = calcShipping(weightGrams, shippingPrice, s.fastShipping);
     const returnCost = (productionCost + shipping + packagingCost) * (s.returnRate / 100);
     const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
     const cargoVatDeduction = shipping / 6;
@@ -725,20 +732,20 @@ function calcBaremOptimization(productionCost: number, weightGrams: number, s: T
 
 // ─── BİLEŞEN ────────────────────────────────────────────────────────────────
 
-export function TrendyolCalculatorClient() {
+export function HepsiburadaCalculatorClient() {
   const { toast } = useToast();
   const [mode, setMode] = useState<"production" | "purchase">("production");
-  const [settings, setSettings] = useState<TrendyolSettings>(() => {
+  const [settings, setSettings] = useState<HepsiburadaSettings>(() => {
     if (typeof window !== "undefined") {
       try {
-        const saved = localStorage.getItem("trendyolSettings");
+        const saved = localStorage.getItem("hepsiburadaSettings");
         if (saved) {
           const parsed = JSON.parse(saved);
           const isOrg = parsed.organicSalesMode !== undefined
             ? Boolean(parsed.organicSalesMode)
             : false;
           return {
-            ...DEFAULT_TRENDYOL_SETTINGS,
+            ...DEFAULT_HEPSIBURADA_SETTINGS,
             ...parsed,
             organicSalesMode: isOrg,
             advertisingRate: isOrg ? 0 : (parsed.advertisingRate ?? 8),
@@ -746,13 +753,13 @@ export function TrendyolCalculatorClient() {
         }
       } catch { /* ignore */ }
     }
-    return DEFAULT_TRENDYOL_SETTINGS;
+    return DEFAULT_HEPSIBURADA_SETTINGS;
   });
   const [showSettings, setShowSettings] = useState(false);
   const [productName, setProductName] = useState("");
   const [weightGrams, setWeightGrams] = useState("");
   const [quantity, setQuantity] = useState("1");
-  const [products, setProducts] = useState<TrendyolProduct[]>([]);
+  const [products, setProducts] = useState<HepsiburadaProduct[]>([]);
   // Ürün başına harici fiyat simülatörü: productId → fiyat string
   const [customPrices, setCustomPrices] = useState<Record<string, string>>({});
   const [catalogSuggestions, setCatalogSuggestions] = useState<Product[]>([]);
@@ -766,7 +773,7 @@ export function TrendyolCalculatorClient() {
     packagingCost: 0, // Kütülama ücreti
     weightGrams: 250, // Ürün gramajı (desi hesabı için)
     profitMargin: 30, // %
-    commissionRate: 16, // Trendyol komisyonu
+    commissionRate: 16, // Hepsiburada komisyonu
     paymentTermFee: 3, // Vade farkı
     returnRate: 3, // Tahmini iade riski oranı %
     fixedCost: 0, // Sabit gider payı ₺
@@ -776,14 +783,14 @@ export function TrendyolCalculatorClient() {
   });
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("trendyolSettings");
+      const saved = localStorage.getItem("hepsiburadaSettings");
       if (saved) {
         const parsed = JSON.parse(saved);
         const isOrg = parsed.organicSalesMode !== undefined
             ? Boolean(parsed.organicSalesMode)
             : false;
         setSettings(prev => ({
-          ...DEFAULT_TRENDYOL_SETTINGS,
+          ...DEFAULT_HEPSIBURADA_SETTINGS,
           ...parsed,
           organicSalesMode: isOrg,
           advertisingRate: isOrg ? 0 : (parsed.advertisingRate ?? 8),
@@ -793,7 +800,7 @@ export function TrendyolCalculatorClient() {
   }, []);
 
   useEffect(() => {
-    const saved = localStorage.getItem("trendyolProducts");
+    const saved = localStorage.getItem("hepsiburadaProducts");
     if (saved) {
       try { setProducts(JSON.parse(saved)); }
       catch { /* ignore */ }
@@ -810,7 +817,7 @@ export function TrendyolCalculatorClient() {
     return () => document.removeEventListener("click", onDoc);
   }, []);
   useEffect(() => {
-    localStorage.setItem("trendyolProducts", JSON.stringify(products));
+    localStorage.setItem("hepsiburadaProducts", JSON.stringify(products));
   }, [products]);
 
   // Fetch product name suggestions from product catalog (Supabase)
@@ -848,14 +855,14 @@ export function TrendyolCalculatorClient() {
     setSuggestionsOpen(false);
   }
 
-  const upd = (patch: Partial<TrendyolSettings>) => setSettings(s => {
+  const upd = (patch: Partial<HepsiburadaSettings>) => setSettings(s => {
     const next = { ...s, ...patch };
     if ('monthlyFixedExpense' in patch || 'monthlyOrderTarget' in patch) {
       const mo = (next.monthlyOrderTarget ?? 0) > 0 ? (next.monthlyOrderTarget ?? 1) : 1;
       next.fixedCostPerOrder = parseFloat(((next.monthlyFixedExpense ?? 0) / mo).toFixed(2));
     }
     try {
-      localStorage.setItem("trendyolSettings", JSON.stringify(next));
+      localStorage.setItem("hepsiburadaSettings", JSON.stringify(next));
     } catch { /* ignore */ }
     return next;
   });
@@ -871,7 +878,7 @@ export function TrendyolCalculatorClient() {
     };
   }
 
-  function getProductTypeFlags(product: TrendyolProduct) {
+  function getProductTypeFlags(product: HepsiburadaProduct) {
     const fromName = detectProductTypeFlags(product.productName || "");
     return {
       isCandleholder: Boolean((product as any).is_candleholder || (product as any).isCandleholder || fromName.isCandleholder),
@@ -880,7 +887,7 @@ export function TrendyolCalculatorClient() {
     };
   }
 
-  function getProductionCostSuffix(product: TrendyolProduct) {
+  function getProductionCostSuffix(product: HepsiburadaProduct) {
     const { isCandleholder, isKeychain, isSoapdish } = getProductTypeFlags(product);
     const extras: string[] = [];
     if (isKeychain) extras.push("Anahtar zinciri");
@@ -936,7 +943,7 @@ export function TrendyolCalculatorClient() {
     const pc = qty > 1
       ? calculateProductCost(p.weightGrams * qty, costSettingsForCalc, false, false, false).totalCost + extraPerUnit * qty
       : calculateProductCost(p.weightGrams, costSettingsForCalc, isCandleholder, isKeychain, isSoapdish).totalCost;
-    const pr = calcTrendyolPrice(pc, p.weightGrams * qty, settings, qty);
+    const pr = calcHepsiburadaPrice(pc, p.weightGrams * qty, settings, qty);
 
     // Gerçek satış fiyatı girilmişse onu kullan
     const actualPriceStr = customPrices[p.id] ?? "";
@@ -965,7 +972,7 @@ export function TrendyolCalculatorClient() {
 
   // Ayar inputu yardımcısı
   const numInput = (
-    id: string, label: string, field: keyof TrendyolSettings,
+    id: string, label: string, field: keyof HepsiburadaSettings,
     step = "1", note?: string
   ) => (
     <div>
@@ -985,7 +992,7 @@ export function TrendyolCalculatorClient() {
         <div className="container mx-auto px-4 lg:px-6 max-w-7xl py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Store className="w-5 h-5 text-orange-600" />
-            <h2 className="font-semibold">Trendyol Hesaplayıcı Modu</h2>
+            <h2 className="font-semibold">Hepsiburada Hesaplayıcı Modu</h2>
           </div>
           <div className="flex gap-2">
             <button
@@ -1021,10 +1028,10 @@ export function TrendyolCalculatorClient() {
         <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-lg">
-              <Store className="w-5 h-5 text-white" />
+              <ShoppingBag className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold">Trendyol Hesaplayıcı</h1>
+              <h1 className="text-2xl font-bold">Hepsiburada Hesaplayıcı</h1>
               <p className="text-sm text-muted-foreground">Pazaryeri satış fiyatı hesaplama</p>
             </div>
           </div>
@@ -1038,7 +1045,7 @@ export function TrendyolCalculatorClient() {
               onChange={(e) => upd({ cargoCompany: e.target.value })}
               className="text-xs font-bold bg-transparent border-0 focus:outline-none focus:ring-0 cursor-pointer text-foreground"
             >
-              {CARGO_COMPANIES.map((c) => (
+              {HEPSIBURADA_COMPANIES.map((c) => (
                 <option key={c.id} value={c.id} className="bg-popover text-foreground">
                   {c.label}
                 </option>
@@ -1056,7 +1063,7 @@ export function TrendyolCalculatorClient() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2"><Package className="w-5 h-5" />Ürün Ekle</CardTitle>
-                <CardDescription>Trendyol'da satacağınız ürünleri ekleyin</CardDescription>
+                <CardDescription>Hepsiburada'da satacağınız ürünleri ekleyin</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1149,7 +1156,7 @@ export function TrendyolCalculatorClient() {
                         ? costCalcTotal.totalCost + extraPerUnit * qty
                         : costCalcUnit.totalCost;
 
-                      const pr = calcTrendyolPrice(pc, product.weightGrams * qty, settings, qty);
+                      const pr = calcHepsiburadaPrice(pc, product.weightGrams * qty, settings, qty);
 
                       // Gerçek satış fiyatı girilmişse tüm breakdown o fiyat üzerinden hesaplanır
                       const actualPriceStr = customPrices[product.id] ?? "";
@@ -1648,7 +1655,7 @@ export function TrendyolCalculatorClient() {
                               <Row label="Sabit Gider" value={`₺${bd.fixedCost.toFixed(2)}`} />
                               <Row label={`İade Maliyeti (%${settings.returnRate})`} value={`₺${bd.returnCost.toFixed(2)}`} color="text-orange-600" />
                               <div className="border-t my-1" />
-                              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-1">Trendyol Kesintileri</p>
+                              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-1">Hepsiburada Kesintileri</p>
                               <Row label={`Komisyon (%${settings.commissionRate})`} value={`−₺${bd.commission.toFixed(2)}`} color="text-red-600" />
                               <Row label={`Vade Farkı (%${settings.paymentTermFee})`} value={`−₺${bd.paymentTermFee.toFixed(2)}`} color="text-red-600" />
                               {!settings.organicSalesMode && (
@@ -1700,7 +1707,7 @@ export function TrendyolCalculatorClient() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
-                  <span className="flex items-center gap-2"><Settings className="w-5 h-5" />Trendyol Ayarları</span>
+                  <span className="flex items-center gap-2"><Settings className="w-5 h-5" />Hepsiburada Ayarları</span>
                   <Button variant="ghost" size="sm" onClick={() => setShowSettings(v => !v)}>
                     {showSettings ? "Gizle" : "Düzenle"}
                   </Button>
@@ -1720,10 +1727,10 @@ export function TrendyolCalculatorClient() {
 
                   <div className="border-t" />
 
-                  {/* Trendyol */}
+                  {/* Hepsiburada */}
                   <section className="space-y-3">
-                    <p className="text-sm font-semibold">Trendyol Maliyetleri</p>
-                    {numInput("t1", "Trendyol Komisyonu (%)", "commissionRate", "0.1", "Hakediş raporunda yazıyorsa o oranı gir")}
+                    <p className="text-sm font-semibold">Hepsiburada Maliyetleri</p>
+                    {numInput("t1", "Hepsiburada Komisyonu (%)", "commissionRate", "0.1", "Hakediş raporunda yazıyorsa o oranı gir")}
                     {numInput("t2", "Vade Farkı (%)", "paymentTermFee", "0.1", "Genellikle %3")}
 
                     {/* Platform Bedeli — Bugün Kargoda toggle */}
@@ -1775,7 +1782,7 @@ export function TrendyolCalculatorClient() {
                       <input type="checkbox" id="fastShipping" checked={settings.fastShipping}
                         onChange={e => upd({ fastShipping: e.target.checked })} className="w-4 h-4" />
                       <Label htmlFor="fastShipping" className="cursor-pointer">
-                        Hızlı Teslimat (Tablo 1) — termin 1 gün veya Hızlı/Bugün Kargoda etiketi
+                        0–1 Gün Termin (Barem Kampanyalı) — %90 ve üzeri kargo performansı
                       </Label>
                     </div>
                     <div>
@@ -1788,14 +1795,14 @@ export function TrendyolCalculatorClient() {
                         onChange={(e) => upd({ cargoCompany: e.target.value })}
                         className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
                       >
-                        {CARGO_COMPANIES.map((c) => (
+                        {HEPSIBURADA_COMPANIES.map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.label}
                           </option>
                         ))}
                       </select>
                       <p className="text-[11px] text-muted-foreground mt-1">
-                        Farklı bir kargo firmasıyla gönderim yapıyorsanız firmanızı seçerek maliyetleri o firmanın özel baremine göre hesaplayabilirsiniz.
+                        Hepsiburada barem kampanyasında sabit fiyat uygulanır, 400 TL üzeri gönderilerde firmanıza özel desi tarifesi geçerli olur.
                       </p>
                     </div>
                     <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
@@ -1887,15 +1894,15 @@ export function TrendyolCalculatorClient() {
                   <div className="border-t pt-2 space-y-2">
                     <Button size="sm" className="w-full bg-orange-500 hover:bg-orange-600 text-white"
                       onClick={() => {
-                        localStorage.setItem("trendyolSettings", JSON.stringify(settings));
+                        localStorage.setItem("hepsiburadaSettings", JSON.stringify(settings));
                         toast({ title: "✅ Ayarlar kaydedildi", description: "Bir sonraki ziyarette de geçerli olacak." });
                       }}>
                       💾 Kaydet
                     </Button>
                     <Button variant="outline" size="sm" className="w-full"
                       onClick={() => {
-                        setSettings(DEFAULT_TRENDYOL_SETTINGS);
-                        localStorage.setItem("trendyolSettings", JSON.stringify(DEFAULT_TRENDYOL_SETTINGS));
+                        setSettings(DEFAULT_HEPSIBURADA_SETTINGS);
+                        localStorage.setItem("hepsiburadaSettings", JSON.stringify(DEFAULT_HEPSIBURADA_SETTINGS));
                         toast({ title: "Varsayılan ayarlar yüklendi" });
                       }}>
                       Varsayılana Dön
@@ -1968,7 +1975,7 @@ export function TrendyolCalculatorClient() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold">Alım Hesaplayıcı & Kar Marjı Simülatörü</h1>
-                <p className="text-sm text-muted-foreground">Tedarikçiden alınan ürünlerin Trendyol kargo baremleri, komisyon ve KDV dahil detaylı kâr dökümü</p>
+                <p className="text-sm text-muted-foreground">Tedarikçiden alınan ürünlerin Hepsiburada kargo baremleri, komisyon ve KDV dahil detaylı kâr dökümü</p>
               </div>
             </div>
 
@@ -2034,7 +2041,7 @@ export function TrendyolCalculatorClient() {
                       }
                       placeholder="250"
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Trendyol Desi hesabı ({gramsToDesi(purchaseSettings.weightGrams || 100)} Desi)</p>
+                    <p className="text-xs text-muted-foreground mt-1">Hepsiburada Desi hesabı ({gramsToDesi(purchaseSettings.weightGrams || 100)} Desi)</p>
                   </div>
                 </div>
 
@@ -2058,7 +2065,7 @@ export function TrendyolCalculatorClient() {
                     <p className="text-xs text-muted-foreground mt-1">Net hedef kâr marjı (fiyat üzerinden)</p>
                   </div>
                   <div>
-                    <Label htmlFor="commission">Trendyol Komisyon Oranı %</Label>
+                    <Label htmlFor="commission">Hepsiburada Komisyon Oranı %</Label>
                     <Input
                       id="commission"
                       type="number"
@@ -2073,7 +2080,7 @@ export function TrendyolCalculatorClient() {
                         }))
                       }
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Trendyol kategori komisyonu</p>
+                    <p className="text-xs text-muted-foreground mt-1">Hepsiburada kategori komisyonu</p>
                   </div>
                   <div>
                     <Label htmlFor="return-rate">Tahmini İade Oranı %</Label>
@@ -2120,7 +2127,7 @@ export function TrendyolCalculatorClient() {
                       onChange={(e) => upd({ cargoCompany: e.target.value })}
                       className="w-full h-9 mt-1 px-3 rounded-lg border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
                     >
-                      {CARGO_COMPANIES.map((c) => (
+                      {HEPSIBURADA_COMPANIES.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.label}
                         </option>
@@ -2198,7 +2205,7 @@ export function TrendyolCalculatorClient() {
                   <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-muted/40 rounded-xl border border-border">
                     <div className="flex items-center gap-2">
                       <Package className="w-5 h-5 text-emerald-600" />
-                      <span className="text-sm font-semibold">Trendyol Kargo Barem Seviyesi:</span>
+                      <span className="text-sm font-semibold">Hepsiburada Kargo Barem Seviyesi:</span>
                       <span className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${activeBd.baremBadgeClass}`}>
                         {activeBd.baremLabel}
                       </span>
@@ -2305,10 +2312,10 @@ export function TrendyolCalculatorClient() {
                       </div>
 
                       <div className="bg-muted/30 p-3 rounded-lg space-y-2">
-                        <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Trendyol Operasyon & Kesinti Kalemleri</p>
+                        <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Hepsiburada Operasyon & Kesinti Kalemleri</p>
                         <Row label={`🚚 Kargo Ücreti (${activeBd.baremLabel})`} value={`₺${activeBd.shippingIncVat.toFixed(2)}`} color="text-amber-600" bold />
                         <Row label={`🚀 Platform Hizmet Bedeli (${settings.useExpressPlatformFee ? "Hızlı" : "Standart"})`} value={`₺${activeBd.platformFeeIncVat.toFixed(2)}`} />
-                        <Row label={`🏷️ Trendyol Komisyonu (%${purchaseSettings.commissionRate})`} value={`−₺${activeBd.commission.toFixed(2)}`} color="text-red-600" />
+                        <Row label={`🏷️ Hepsiburada Komisyonu (%${purchaseSettings.commissionRate})`} value={`−₺${activeBd.commission.toFixed(2)}`} color="text-red-600" />
                         <Row label={`💳 Vade Farkı / Kesinti (%${purchaseSettings.paymentTermFee})`} value={`−₺${activeBd.paymentTerm.toFixed(2)}`} color="text-red-600" />
                         {activeBd.advertising > 0 && (
                           <Row label={`📢 Reklam Gideri (%${settings.advertisingRate})`} value={`−₺${activeBd.advertising.toFixed(2)}`} color="text-orange-600" />

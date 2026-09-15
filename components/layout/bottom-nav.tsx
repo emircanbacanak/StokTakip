@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ShoppingCart, Factory, Users, Package, Calculator, Store, FileText } from "lucide-react";
+import { LayoutDashboard, ShoppingCart, Factory, Users, Package, Calculator, Store, FileText, ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -14,6 +14,7 @@ const navItems = [
   { href: "/dashboard/invoicing", label: "Fatura", icon: FileText },
   { href: "/dashboard/accounting", label: "Muhasebe", icon: Calculator },
   { href: "/dashboard/trendyol", label: "Trendyol", icon: Store },
+  { href: "/dashboard/hepsiburada", label: "Hepsiburada", icon: ShoppingBag },
 ];
 
 export function BottomNav() {

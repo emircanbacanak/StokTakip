@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ShoppingCart, Factory, Users, Package, Palette, Calculator, Store, FileText, PackagePlus } from "lucide-react";
+import { LayoutDashboard, ShoppingCart, Factory, Users, Package, Palette, Calculator, Store, FileText, PackagePlus, ShoppingBag, Coins } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -16,7 +16,13 @@ const navItems = [
   { href: "/dashboard/invoicing", label: "Fatura Yönetimi", icon: FileText },
   { href: "/dashboard/accounting", label: "Muhasebe", icon: Calculator },
   { href: "/dashboard/product-upload", label: "Ürün Yükleme", icon: PackagePlus },
+  { href: "/dashboard/pricing", label: "Fiyatlandırma", icon: Coins },
   { href: "/dashboard/trendyol", label: "Trendyol", icon: Store },
+  { href: "/dashboard/hepsiburada", label: "Hepsiburada", icon: ShoppingBag },
+  { href: "/dashboard/n11", label: "n11", icon: Store },
+  { href: "/dashboard/pazarama", label: "Pazarama", icon: Store },
+  { href: "/dashboard/trendruum", label: "Trendruum", icon: Store },
+  { href: "/dashboard/idefix", label: "İdefix", icon: Store },
 ];
 
 export function DesktopSidebar() {

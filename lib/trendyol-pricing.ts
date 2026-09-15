@@ -25,20 +25,20 @@ export interface TrendyolPricingSettings {
 }
 
 export const DEFAULT_TRENDYOL_PRICING_SETTINGS: TrendyolPricingSettings = {
-  filamentPricePerKg: 650,
-  electricityCostPerGram: 0.10,
+  filamentPricePerKg: 500,
+  electricityCostPerGram: 0.05,
   depreciationCostPerGram: 0.05,
-  wastePercentage: 10,
+  wastePercentage: 0,
   commissionRate: 16,
-  paymentTermFee: 3,
+  paymentTermFee: 0,
   packagingCost: 15,
   platformFeeBase: 10.99,
   fastShipping: true,
-  advertisingRate: 8,
-  returnRate: 5,
-  fixedCostPerOrder: 10,
+  advertisingRate: 0,
+  returnRate: 12,
+  fixedCostPerOrder: 33.33,
   organicSalesMode: true,
-  profitMargin: 20,
+  profitMargin: 10,
   candleholderCostPerUnit: 0,
   keychainCostPerUnit: 2,
   soapdishCostPerUnit: 0,
@@ -72,7 +72,8 @@ function calcPriceForShipping(
   const returnCost = (productionCost + shipping + packagingCost) * (settings.returnRate / 100);
   const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
 
-  const adRate = settings.organicSalesMode ? 0 : settings.advertisingRate / 100;
+  const isOrganic = settings.organicSalesMode || (settings.advertisingRate === 0);
+  const adRate = isOrganic ? 0 : (settings.advertisingRate || 0) / 100;
   const totalCutRate = (settings.commissionRate + settings.paymentTermFee) / 100 + adRate;
 
   const wastedGrams = weightGrams * (1 + settings.wastePercentage / 100);
@@ -197,7 +198,8 @@ export function calcTrendyolBreakdownAtPrice(
   const platformFee = settings.platformFeeBase * 1.20; // KDV hariç girildiği için * 1.20 ile KDV dahil tutar bulunur
   const packagingCost = settings.packagingCost;
   const fixedCost = settings.fixedCostPerOrder;
-  const adRate = settings.organicSalesMode ? 0 : settings.advertisingRate / 100;
+  const isOrganic = settings.organicSalesMode || (settings.advertisingRate === 0);
+  const adRate = isOrganic ? 0 : (settings.advertisingRate || 0) / 100;
 
   const shipping = calcShippingCost(weightGrams, price, settings.fastShipping);
   const returnCost = (productionCost + shipping + packagingCost) * (settings.returnRate / 100);
