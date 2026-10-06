@@ -71,3 +71,43 @@ export function cleanProductName(name: string): string {
 
   return clean || name;
 }
+
+/**
+ * Akıllı Doğal Sıralama (Natural Sort)
+ * Türkçe karakterleri (ç, ğ, ı, ö, ş, ü vb.) ve sayıları/ölçüleri (10 cm, 15 cm, 20 cm, vb.) doğru sıraya dizer.
+ * "Belirtilmemiş", "Diğer" gibi özel alanları listenin en sonuna atar.
+ */
+export function naturalSort<T>(
+  items: T[],
+  getText: (item: T) => string = (x) => String(x)
+): T[] {
+  if (!items || !Array.isArray(items)) return [];
+
+  return [...items].sort((a, b) => {
+    const textA = (getText(a) || "").trim();
+    const textB = (getText(b) || "").trim();
+
+    // Özel etiketler en sona gelsin
+    const isSpecialA = /belirtilme|diğer/i.test(textA);
+    const isSpecialB = /belirtilme|diğer/i.test(textB);
+    if (isSpecialA && !isSpecialB) return 1;
+    if (!isSpecialA && isSpecialB) return -1;
+
+    // Metindeki ilk sayıyı çıkar (örn: "15 cm" -> 15, "0 - 10 cm" -> 0, "5+" -> 5)
+    const numMatchA = textA.match(/\d+(?:[.,]\d+)?/);
+    const numMatchB = textB.match(/\d+(?:[.,]\d+)?/);
+    const numA = numMatchA ? parseFloat(numMatchA[0].replace(",", ".")) : null;
+    const numB = numMatchB ? parseFloat(numMatchB[0].replace(",", ".")) : null;
+
+    if (numA !== null && numB !== null) {
+      if (numA !== numB) return numA - numB;
+    } else if (numA !== null && numB === null) {
+      return -1;
+    } else if (numA === null && numB !== null) {
+      return 1;
+    }
+
+    return textA.localeCompare(textB, "tr", { numeric: true, sensitivity: "base" });
+  });
+}
+

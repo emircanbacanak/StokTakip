@@ -1,35 +1,123 @@
-# dependencies
+# ==========================================
+# Dependencies
+# ==========================================
 /node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
 
-# testing
+# ==========================================
+# Testing & Reports
+# ==========================================
 /coverage
+playwright-report/
+test-results/
+blob-report/
 
-# next.js
+# ==========================================
+# Next.js & Build Output
+# ==========================================
 /.next/
 /out/
-
-# production
 /build
+.turbo
+next-env.d.ts
+*.tsbuildinfo
 
-# misc
-.DS_Store
+# ==========================================
+# Project Specific Data, Uploads & Downloads
+# ==========================================
+/downloads
+/output
+/public/uploads
+/public/invoices
+/supabase_migrations
+
+# ==========================================
+# Browser Automation Profiles, Sessions & Cache
+# ==========================================
+.trendyol_profile
+.gib_profile
+.cache
+.puppeteer
+*.crdownload
+*.tmp
+storage_state.json
+*cookies*.json
+*.session
+
+# ==========================================
+# Sensitive Documents & Data Exports (KVKK / Privacy)
+# ==========================================
+*.pdf
+*.xml
+*.zip
+*.rar
+*.xlsx
+*.xls
+*.csv
+
+# ==========================================
+# Environment Variables & Credentials
+# ==========================================
+.env*
+!.env.example
 *.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
 
-# debug
+# ==========================================
+# Local Databases & SQL Dumps
+# ==========================================
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sql
+
+# ==========================================
+# Temporary & Debug Scripts
+# ==========================================
+temp-*
+temp.*
+dump-*
+*-debug.*
+debug-*
+find-*
+test-*
+scratch/
+*.heapsnapshot
+
+# ==========================================
+# IDE, OS & AI Agent Files
+# ==========================================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+.vscode/
+.idea/
+.kiro/
+.gemini/
+.agents/
+*.swp
+*~
+
+# ==========================================
+# Logs
+# ==========================================
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
-# local env files
-.env*.local
-.env
-
-# vercel
+# ==========================================
+# Vercel
+# ==========================================
 .vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts

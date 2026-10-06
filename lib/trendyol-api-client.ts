@@ -124,8 +124,12 @@ export function sanitizeTrendyolDescription(html: string): string {
   if (!html) return "";
   let clean = html.trim();
 
-  // 1. Toptan sipariş ibaresini temizle
+  // 1. Toptan sipariş ibaresini ve Trendyol yasaklı kelimelerini temizle
   clean = clean.replace(/Toptan sipari[şs] vermeyin\.?\s*/gi, "").trim();
+  // Trendyol figür/biblo kategorisinde 'koleksiyon' kelimesi botlar tarafından 'Yasaklı Kelime' (telif/lisans) gerekçesiyle reddedilir
+  clean = clean.replace(/\bkoleksiyonluk\b/gi, "özel sergileme");
+  clean = clean.replace(/\bkoleksiyon(u|un|a|da|dan)?\b/gi, "özel sergileme");
+  clean = clean.replace(/\bcollection\b/gi, "special display");
 
   // 1b. HTML Yorumlarını (<!--StartFragment-->, <!--EndFragment--> vb.) tamamen temizle
   clean = clean.replace(/<!--[\s\S]*?-->/g, "");

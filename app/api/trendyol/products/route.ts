@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sanitizeTrendyolDescription } from "@/lib/trendyol-api-client";
+import { detectCategoryFromProduct } from "@/lib/trendyol-categories-static";
 
 const SELLER_ID = process.env.TRENDYOL_SELLER_ID ?? "";
 const API_KEY = process.env.TRENDYOL_API_KEY ?? "";
@@ -115,8 +116,12 @@ export async function GET(req: NextRequest) {
               title: item.title,
               brand: typeof item.brand === "object" ? item.brand?.name : (item.brand || ""),
               brandId: typeof item.brand === "object" ? item.brand?.id : undefined,
-              categoryName: typeof item.category === "object" ? item.category?.name : (item.category || ""),
-              categoryId: typeof item.category === "object" ? item.category?.id : undefined,
+              categoryName:
+                (typeof item.category === "object" ? item.category?.name : (item.categoryName || item.category)) ||
+                detectCategoryFromProduct(item).name,
+              categoryId:
+                (typeof item.category === "object" ? item.category?.id : item.categoryId) ||
+                detectCategoryFromProduct(item).id,
               barcode: matchedVariant?.barcode || barcodeParam,
               stockCode: matchedVariant?.stockCode || item.stockCode || "",
               salePrice: matchedVariant?.price?.salePrice ?? item.salePrice,
@@ -260,6 +265,7 @@ export async function GET(req: NextRequest) {
               barcode: variant.barcode,
               stock_code: variant.stockCode || item.productMainId || variant.barcode,
               brand_name: brandName,
+              category_id: null,
               list_price: variant.price?.listPrice ?? variant.price?.salePrice ?? 0,
               sale_price: variant.price?.salePrice ?? 0,
               vat_rate: variant.vatRate ?? 20,
@@ -338,6 +344,7 @@ export async function GET(req: NextRequest) {
                 barcode: variant.barcode,
                 stock_code: variant.stockCode || item.productMainId || variant.barcode,
                 brand_name: brandName,
+                category_id: null,
                 list_price: variant.price?.listPrice ?? variant.price?.salePrice ?? 0,
                 sale_price: variant.price?.salePrice ?? 0,
                 vat_rate: variant.vatRate ?? 20,
@@ -376,15 +383,29 @@ export async function GET(req: NextRequest) {
       }
 
       // 3. Trendyol'da artık var olmayan veya silinmiş kayıtları Supabase'den temizle
+      // (Önemli: Durumu "pending" (Onay Bekliyor) olanlar veya son 7 gün içinde eklenmiş yeni ürünler asla silinmez)
       if (liveBarcodes.size > 0) {
         try {
           const { data: currentDbRows } = await supabase
             .from("trendyol_listings")
-            .select("barcode");
+            .select("barcode, trendyol_status, submitted_at, created_at");
+
+          const now = Date.now();
+          const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
           const staleBarcodes = (currentDbRows ?? [])
-            .map((r: any) => r.barcode)
-            .filter((b: string) => b && !liveBarcodes.has(b));
+            .filter((r: any) => {
+              if (!r.barcode || liveBarcodes.has(r.barcode)) return false;
+              if (r.trendyol_status === "pending" || r.trendyol_status === "draft") return false;
+              const dateMs = r.submitted_at
+                ? new Date(r.submitted_at).getTime()
+                : r.created_at
+                ? new Date(r.created_at).getTime()
+                : 0;
+              if (dateMs && now - dateMs < SEVEN_DAYS_MS) return false;
+              return true;
+            })
+            .map((r: any) => r.barcode);
 
           if (staleBarcodes.length > 0) {
             console.log(`[trendyol/products sync] Trendyol canlı kataloğunda olmayan ${staleBarcodes.length} ürün temizleniyor:`, staleBarcodes);

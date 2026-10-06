@@ -301,6 +301,32 @@ export function OmnichannelPricingClient() {
     });
   };
 
+  // Pazaryeri sayfasına yönlendirme URL'si oluşturucu
+  const buildMarketplaceUrl = (mpId: MarketplaceId, mpDashboardUrl: string, recPrice: number) => {
+    const params = new URLSearchParams();
+    if (productName.trim()) params.set("name", productName.trim());
+    if (weightGrams) params.set("weight", weightGrams);
+    if (quantity) params.set("qty", quantity);
+    if (flags.isCandleholder) params.set("candle", "1");
+    if (flags.isKeychain) params.set("keychain", "1");
+    if (flags.isSoapdish) params.set("soap", "1");
+
+    const customP = platformSimulatedPrices[mpId] || globalSimulatedPrice;
+    if (customP && !isNaN(parseFloat(customP)) && parseFloat(customP) > 0) {
+      params.set("simPrice", parseFloat(customP).toFixed(2));
+      params.set("price", parseFloat(customP).toFixed(2));
+    } else if (recPrice && !isNaN(recPrice) && recPrice > 0) {
+      params.set("price", recPrice.toFixed(2));
+    }
+
+    const currentCargo = platformSettings[mpId]?.cargoCompany;
+    if (currentCargo && currentCargo !== "auto") {
+      params.set("cargo", currentCargo);
+    }
+
+    return `${mpDashboardUrl}?${params.toString()}`;
+  };
+
   // Ürünü Listeye Ekle
   const addCurrentProductToList = () => {
     const wt = parseFloat(weightGrams) || 100;
@@ -705,9 +731,9 @@ export function OmnichannelPricingClient() {
                     </div>
 
                     <Link
-                      href={mp.dashboardUrl}
+                      href={buildMarketplaceUrl(mp.id, mp.dashboardUrl, activeBreakdown.price)}
                       className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 p-1 hover:bg-muted rounded-lg"
-                      title={`${mp.name} paneline git`}
+                      title={`${mp.name} sayfasına git ve otomatik hesapla`}
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                     </Link>
@@ -999,6 +1025,22 @@ export function OmnichannelPricingClient() {
                       Kopyala
                     </Button>
                   </div>
+
+                  {/* Pazaryerinde Aç ve Otomatik Hesapla Butonu */}
+                  <div className="pt-2 border-t">
+                    <Button
+                      asChild
+                      className="w-full h-8 text-xs font-bold gap-1.5 shadow-sm text-white"
+                      style={{
+                        backgroundColor: mp.accentColor,
+                      }}
+                    >
+                      <Link href={buildMarketplaceUrl(mp.id, mp.dashboardUrl, activeBreakdown.price)}>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        {mp.name}&apos;da Aç ve Hesapla
+                      </Link>
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             );
@@ -1090,6 +1132,18 @@ export function OmnichannelPricingClient() {
                         </td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              asChild
+                              className="h-7 px-2 text-xs font-semibold gap-1 text-primary hover:text-primary"
+                              title={`${mp.name} sayfasında otomatik hesapla`}
+                            >
+                              <Link href={buildMarketplaceUrl(mp.id, mp.dashboardUrl, b.price)}>
+                                <ExternalLink className="w-3 h-3" />
+                                Aç
+                              </Link>
+                            </Button>
                             <Button
                               variant="ghost"
                               size="sm"

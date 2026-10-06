@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { TRENDYOL_CATEGORIES_TR } from "@/lib/trendyol-categories-static";
+import { naturalSort } from "@/lib/utils";
 
 const SELLER_ID  = process.env.TRENDYOL_SELLER_ID ?? "";
 const API_KEY    = process.env.TRENDYOL_API_KEY ?? "";
@@ -177,7 +178,20 @@ export async function GET(req: NextRequest) {
       const res = await fetch(url, { headers: headers() });
       if (res.ok) {
         const data = await res.json();
-        return NextResponse.json({ categoryAttributes: data.categoryAttributes ?? [] });
+        const rawAttrs = data.categoryAttributes ?? [];
+        const sortedAttrs = [...rawAttrs]
+          .sort((a: any, b: any) => {
+            const reqA = a.required || a.mandatory;
+            const reqB = b.required || b.mandatory;
+            if (reqA && !reqB) return -1;
+            if (!reqA && reqB) return 1;
+            return (a.attribute?.name || "").localeCompare(b.attribute?.name || "", "tr");
+          })
+          .map((attr: any) => ({
+            ...attr,
+            attributeValues: naturalSort(attr.attributeValues || [], (v: any) => v.name || v.value),
+          }));
+        return NextResponse.json({ categoryAttributes: sortedAttrs });
       }
       console.warn(`[trendyol-meta/attributes] ${res.status}`);
       return NextResponse.json({ categoryAttributes: [] });
@@ -192,8 +206,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, configured: false, reason: "Env değişkenleri eksik" });
     }
     const testUrls = [
+      `${BASE_URL}/product/sellers/${SELLER_ID}/products?page=0&size=1`,
       `${BASE_URL}/product/suppliers/${SELLER_ID}/products?page=0&size=1`,
-      `${BASE_URL_V1}/suppliers/${SELLER_ID}/products?page=0&size=1`,
     ];
     for (const url of testUrls) {
       try {

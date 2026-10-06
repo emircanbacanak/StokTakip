@@ -15,6 +15,26 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "**.supabase.co",
       },
+      {
+        protocol: "https",
+        hostname: "**.dsmcdn.com",
+      },
+      {
+        protocol: "https",
+        hostname: "cdn.dsmcdn.com",
+      },
+      {
+        protocol: "https",
+        hostname: "**.mncdn.com",
+      },
+      {
+        protocol: "https",
+        hostname: "i.ibb.co",
+      },
+      {
+        protocol: "https",
+        hostname: "images.unsplash.com",
+      },
     ],
   },
   webpack: (config, { isServer }) => {

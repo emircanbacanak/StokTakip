@@ -54,6 +54,10 @@ interface TrendyolSettings {
 
   // Hedef
   profitMargin: number;         // % — net kâr / satış fiyatı (fiyat üzerinden)
+
+  // Kampanya / İndirimli Fiyatlandırma
+  campaignDiscountRate: number; // % — kampanya / kupon indirim oranı (Örn: %10)
+  useCampaignPricing: boolean;  // true = yüksek liste fiyatı girilir, indirim sonrası hedef fiyata ulaşılır
 }
 
 const DEFAULT_TRENDYOL_SETTINGS: TrendyolSettings = {
@@ -84,6 +88,8 @@ const DEFAULT_TRENDYOL_SETTINGS: TrendyolSettings = {
   soapdishCostPerUnit: 0,
 
   profitMargin: 10,
+  campaignDiscountRate: 10,
+  useCampaignPricing: true,
 };
 
 // ─── HESAPLAMA MANTIĞI ──────────────────────────────────────────────────────
@@ -149,9 +155,11 @@ interface Breakdown {
 
 interface PricingResult {
   recommendedPrice: number;  // barem optimizasyonu sonrası gerçek önerilen fiyat
-  targetPrice: number;       // hedef kâr marjına göre hesaplanan fiyat, ₺5 yuvarlanmış
-  exactTargetPrice: number;  // hedef kâr marjına göre kuruşuna kadar fiyat (yuvarlama yok)
+  targetPrice: number;       // hedef kâr marjına göre hesaplanan fiyat
+  exactTargetPrice: number;  // hedef kâr marjına göre kuruşuna kadar fiyat
   breakEvenPrice: number;
+  listPrice: number;         // Üstü çizili girilecek liste fiyatı (kampanya öncesi)
+  campaignDiscountRate: number; // Uygulanan indirim oranı %
   breakdown: Breakdown;
 }
 
@@ -277,7 +285,6 @@ function calcDetailedPurchasePrice(
     return totalBaseExpensesExVat / denom;
   };
 
-  let recPrice = 200;
   const sh199 = calcShippingCost(weightGrams, 199, s.fastShipping, s.cargoCompany);
   const p1 = calcExactPriceForShipping(sh199);
 
@@ -287,14 +294,21 @@ function calcDetailedPurchasePrice(
   const sh350 = calcShippingCost(weightGrams, 350, s.fastShipping, s.cargoCompany);
   const p3 = calcExactPriceForShipping(sh350);
 
-  if (p1 <= 199) recPrice = Math.ceil(p1);
-  else if (p2 >= 200 && p2 < 350) recPrice = Math.ceil(p2);
-  else recPrice = Math.ceil(p3);
+  let exactTargetPrice = p3;
+  if (p1 <= 199) {
+    exactTargetPrice = p1;
+  } else if (p2 >= 200 && p2 < 350) {
+    exactTargetPrice = p2;
+  } else {
+    exactTargetPrice = p3;
+  }
 
-  if (recPrice > 199) {
+  let recPrice = Math.ceil(exactTargetPrice);
+
+  if (desi < 10) {
     const r199 = calcForPrice(199);
-    const rRec = calcForPrice(recPrice);
-    if (r199 && rRec && r199.netProfitAfterVat > rRec.netProfitAfterVat) {
+    // Barem 1 optimizasyonu: Eğer hedef fiyat 200-225 TL arasındaysa ve 199 TL kârlıysa 199 TL öner
+    if (recPrice >= 200 && recPrice <= 225 && r199 && r199.netProfitAfterVat > 0) {
       recPrice = 199;
     }
   }
@@ -505,21 +519,33 @@ function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number
   const p3 = calcPriceForShippingComp(sh350, productionCostTotal, weightGramsTotal, s, m);
   const be3 = calcPriceForShippingComp(sh350, productionCostTotal, weightGramsTotal, s, 0);
 
-  let exactTargetPrice = p3;
-  if (isFinite(priceUnder200)) exactTargetPrice = priceUnder200;
-  else if (isFinite(price200to350)) exactTargetPrice = price200to350;
-
+  // Başabaş fiyatı (En ucuz geçerli barem kargosuyla hesaplanır)
   let bePrice = be3;
-  if (isFinite(beUnder200)) bePrice = beUnder200;
-  else if (isFinite(be200to350)) bePrice = be200to350;
+  if (desi < 10) {
+    if (isFinite(beUnder200) && beUnder200 <= 199) {
+      bePrice = beUnder200;
+    } else if (isFinite(be200to350) && be200to350 < 350) {
+      bePrice = be200to350;
+    }
+  }
+
+  // Girdiğin kâr oranını (% margin) tam veren matematiksel satış fiyatı:
+  let exactTargetPrice = p3;
+  if (isFinite(priceUnder200) && priceUnder200 <= 199) {
+    exactTargetPrice = priceUnder200;
+  } else if (isFinite(price200to350) && price200to350 >= 200 && price200to350 < 350) {
+    exactTargetPrice = price200to350;
+  } else {
+    exactTargetPrice = p3;
+  }
 
   const targetPrice = Math.ceil(exactTargetPrice);
   let recommendedPrice = targetPrice;
 
-  if (desi < 10 && targetPrice > 199) {
+  if (desi < 10) {
     const r199 = calcAtFixedPrice(199, productionCostTotal, weightGramsTotal, s);
-    const rRec = calcAtFixedPrice(targetPrice, productionCostTotal, weightGramsTotal, s);
-    if (r199.netProfitAfterVat > rRec.netProfitAfterVat) {
+    // Barem 1 optimizasyonu: Eğer hedef fiyat 200-225 TL arasındaysa ve 199 TL kârlıysa 199 TL öner
+    if (targetPrice >= 200 && targetPrice <= 225 && r199.netProfitAfterVat > 0) {
       recommendedPrice = 199;
     }
   }
@@ -551,11 +577,18 @@ function calcTrendyolPrice(productionCostTotal: number, weightGramsTotal: number
   const vatPaidOnInputs = vatPaidShipping + vatPaidPlatform + rCommissionForVat + rPaymentTermForVat + rAdvertisingForVat + vatPaidFilament + vatPaidElectricity + vatPaidPackaging;
   const vatPayable = Math.max(0, vatCollected - vatPaidOnInputs);
 
+  const discountRate = s.useCampaignPricing !== false ? (s.campaignDiscountRate ?? 10) : 0;
+  const listPrice = discountRate > 0 && discountRate < 100
+    ? Math.ceil(recommendedPrice / (1 - discountRate / 100))
+    : recommendedPrice;
+
   return {
     recommendedPrice,
     targetPrice,
     exactTargetPrice,
     breakEvenPrice: Math.ceil(bePrice),
+    listPrice,
+    campaignDiscountRate: discountRate,
     breakdown: {
       productionCost: productionCostTotal,
       packagingCost,
@@ -647,80 +680,121 @@ function calcAtFixedPrice(price: number, productionCostTotal: number, weightGram
 }
 
 interface BaremScenario {
-  label: string;           // "Barem Altı (max ₺199)"
+  label: string;
+  tag: string;
+  badgeColor?: string;
   band: "under200" | "200to350" | "over350";
-  price: number;           // Seçilen satış fiyatı
-  exactTargetPrice?: number; // Hedef % için tam hesaplanan fiyat
+  price: number;
   shipping: number;
   netProfit: number;
   netMarginOnPrice: number;
   totalExpenses: number;
-  isOptimal: boolean;
-  priceDiff: number;       // Önerilen fiyata göre fark
-  profitDiff: number;      // Önerilen kârına göre fark
+  isRecommended: boolean;
+  profitDiff: number;
+}
+
+interface BaremOptimizationResult {
+  scenarios: BaremScenario[];
+  equivPriceInBarem2: number | null;
+  netProfit199: number;
+  recommendedPrice: number;
 }
 
 /**
- * Her barem bandı için KDV sonrası net kârı karşılaştırır.
+ * Barem optimizasyonu ve kargo sıçrama analizi
  */
-function calcBaremOptimization(productionCost: number, weightGrams: number, s: TrendyolSettings, recommendedPrice: number): BaremScenario[] {
-  const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
-  const totalCutRate = (s.commissionRate + s.paymentTermFee) / 100 + adRate;
-  const vatNetRate = (1 - (s.commissionRate + s.paymentTermFee) / 100) / 6;
-  const filamentCost = (weightGrams * (1 + s.wastePercentage / 100) / 1000) * s.filamentPricePerKg;
-  const platformFee = getActivePlatformFee(s);
-  const packagingCost = s.packagingCost;
-  const fixedCost = s.fixedCostPerOrder;
-  const fixedVatDeductions = (platformFee + filamentCost + packagingCost) / 6;
-
+function calcBaremOptimization(
+  productionCost: number,
+  weightGrams: number,
+  s: TrendyolSettings,
+  recommendedPrice: number
+): BaremOptimizationResult {
   const under200Max = 199;
   const band200Max = 349;
+  const scenarios: BaremScenario[] = [];
 
-  const scenarios: Omit<BaremScenario, "isOptimal" | "priceDiff" | "profitDiff">[] = [];
-
-  // Başabaş fiyatı: KDV sonrası kâr = 0
-  const calcExactPrice = (shippingPrice: number) => {
-    const shipping = calcShipping(weightGrams, shippingPrice, s.fastShipping, s.cargoCompany);
-    const returnCost = (productionCost + shipping + packagingCost) * (s.returnRate / 100);
-    const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
-    const cargoVatDeduction = shipping / 6;
-    return (baseCost - fixedVatDeductions - cargoVatDeduction) / (1 - totalCutRate - vatNetRate);
-  };
-
-  // 1) Barem altı: ₺199 tavan
+  // 1) Barem 1: ₺199 Tavan (En Düşük Kargo)
   const r199 = calcAtFixedPrice(under200Max, productionCost, weightGrams, s);
-  const exactUnder200 = calcExactPrice(under200Max);
-  scenarios.push({ label: "Barem Altı (₺199)", band: "under200", price: under200Max, exactTargetPrice: exactUnder200, shipping: r199.shipping, netProfit: r199.netProfitAfterVat, netMarginOnPrice: r199.netMarginAfterVat, totalExpenses: r199.totalExpenses });
+  const is199Rec = recommendedPrice === under200Max;
+  scenarios.push({
+    label: "Barem 1 (₺199 Tavan)",
+    tag: "⚡ En Düşük Kargo",
+    badgeColor: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300",
+    band: "under200",
+    price: under200Max,
+    shipping: r199.shipping,
+    netProfit: r199.netProfitAfterVat,
+    netMarginOnPrice: r199.netMarginAfterVat,
+    totalExpenses: r199.totalExpenses,
+    isRecommended: is199Rec,
+    profitDiff: 0,
+  });
 
-  // 2) Barem üstü: 350+ bandı
-  const exactOver = calcExactPrice(350);
-  if (exactOver >= 350) {
-    const rHigh = calcAtFixedPrice(exactOver, productionCost, weightGrams, s);
-    scenarios.push({ label: `Barem Üstü (₺${exactOver.toFixed(2)})`, band: "over350", price: exactOver, exactTargetPrice: exactOver, shipping: rHigh.shipping, netProfit: rHigh.netProfitAfterVat, netMarginOnPrice: rHigh.netMarginAfterVat, totalExpenses: rHigh.totalExpenses });
+  // 2) Barem 2: ₺349 Tavan (Standart Kargoya Girmeden Max Kâr)
+  const r349 = calcAtFixedPrice(band200Max, productionCost, weightGrams, s);
+  const is349Rec = recommendedPrice === band200Max;
+  scenarios.push({
+    label: "Barem 2 (₺349 Tavan)",
+    tag: is349Rec ? "🎯 Önerilen (Barem 2 Max)" : "💰 Barem 2 Max Kâr",
+    badgeColor: is349Rec
+      ? "bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
+      : "bg-purple-100 text-purple-800 dark:bg-purple-950/40 dark:text-purple-300",
+    band: "200to350",
+    price: band200Max,
+    shipping: r349.shipping,
+    netProfit: r349.netProfitAfterVat,
+    netMarginOnPrice: r349.netMarginAfterVat,
+    totalExpenses: r349.totalExpenses,
+    isRecommended: is349Rec,
+    profitDiff: r349.netProfitAfterVat - r199.netProfitAfterVat,
+  });
+
+  // 3) Hedef / Önerilen Fiyat (Eğer 199 veya 349'dan farklıysa)
+  if (recommendedPrice !== under200Max && recommendedPrice !== band200Max) {
+    const rRec = calcAtFixedPrice(recommendedPrice, productionCost, weightGrams, s);
+    scenarios.push({
+      label: recommendedPrice >= 350 ? `Hedef Fiyat (₺${recommendedPrice})` : `Önerilen Fiyat (₺${recommendedPrice})`,
+      tag: `🎯 %${s.profitMargin} Hedef Kâr`,
+      badgeColor: "bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300",
+      band: recommendedPrice < 200 ? "under200" : recommendedPrice < 350 ? "200to350" : "over350",
+      price: recommendedPrice,
+      shipping: rRec.shipping,
+      netProfit: rRec.netProfitAfterVat,
+      netMarginOnPrice: rRec.netMarginAfterVat,
+      totalExpenses: rRec.totalExpenses,
+      isRecommended: true,
+      profitDiff: rRec.netProfitAfterVat - r199.netProfitAfterVat,
+    });
   }
 
-  // 3) Önerilen fiyat
-  if (recommendedPrice >= 200) {
-    const clampedRec = Math.min(recommendedPrice, band200Max);
-    const rRec = calcAtFixedPrice(clampedRec, productionCost, weightGrams, s);
-    scenarios.push({ label: `Önerilen (₺${clampedRec})`, band: clampedRec < 350 ? "200to350" : "over350", price: clampedRec, exactTargetPrice: clampedRec, shipping: rRec.shipping, netProfit: rRec.netProfitAfterVat, netMarginOnPrice: rRec.netMarginAfterVat, totalExpenses: rRec.totalExpenses });
+  // Barem 2'de Barem 1 ile aynı TL net kârı veren eşik fiyat (Kargo sıçrama telafisi)
+  let equivPriceInBarem2: number | null = null;
+  if (r199.netProfitAfterVat > 0) {
+    const platformFee = getActivePlatformFee(s);
+    const packagingCost = s.packagingCost;
+    const fixedCost = s.fixedCostPerOrder;
+    const adRate = s.organicSalesMode ? 0 : s.advertisingRate / 100;
+    const totalCutRate = (s.commissionRate + s.paymentTermFee) / 100 + adRate;
+    const sh250 = calcShipping(weightGrams, 250, s.fastShipping, s.cargoCompany);
+    const returnCost = (productionCost + sh250 + packagingCost) * (s.returnRate / 100);
+    const baseCost = productionCost + sh250 + packagingCost + platformFee + fixedCost + returnCost;
+    const wastedGrams = weightGrams * (1 + s.wastePercentage / 100);
+    const filamentCost = (wastedGrams / 1000) * s.filamentPricePerKg;
+    const electricityCost = wastedGrams * s.electricityCostPerGram;
+    const fixedVatInputs = (sh250 + platformFee + filamentCost + electricityCost + packagingCost) * 0.20 / 1.20;
+    const denom = (5 / 6) * (1 - totalCutRate);
+    if (denom > 0) {
+      const pEquiv = (baseCost - fixedVatInputs + r199.netProfitAfterVat) / denom;
+      equivPriceInBarem2 = Math.ceil(pEquiv);
+    }
   }
 
-  // 4) 350+ bandı
-  if (recommendedPrice >= 350) {
-    const r3 = calcAtFixedPrice(recommendedPrice, productionCost, weightGrams, s);
-    scenarios.push({ label: `350+ (₺${recommendedPrice})`, band: "over350", price: recommendedPrice, exactTargetPrice: recommendedPrice, shipping: r3.shipping, netProfit: r3.netProfitAfterVat, netMarginOnPrice: r3.netMarginAfterVat, totalExpenses: r3.totalExpenses });
-  }
-
-  const maxProfit = Math.max(...scenarios.map(sc => sc.netProfit));
-  const net199Profit = r199.netProfitAfterVat;
-
-  return scenarios.map(sc => ({
-    ...sc,
-    isOptimal: Math.abs(sc.netProfit - maxProfit) < 0.01,
-    priceDiff: sc.price - under200Max,
-    profitDiff: sc.netProfit - net199Profit,
-  }));
+  return {
+    scenarios,
+    equivPriceInBarem2,
+    netProfit199: r199.netProfitAfterVat,
+    recommendedPrice,
+  };
 }
 
 // ─── BİLEŞEN ────────────────────────────────────────────────────────────────
@@ -742,6 +816,8 @@ export function TrendyolCalculatorClient() {
             ...parsed,
             organicSalesMode: isOrg,
             advertisingRate: isOrg ? 0 : (parsed.advertisingRate ?? 8),
+            campaignDiscountRate: parsed.campaignDiscountRate !== undefined ? parsed.campaignDiscountRate : 10,
+            useCampaignPricing: parsed.useCampaignPricing !== undefined ? Boolean(parsed.useCampaignPricing) : true,
           };
         }
       } catch { /* ignore */ }
@@ -775,29 +851,73 @@ export function TrendyolCalculatorClient() {
     customPrice: "", // Belirlenen özel satış fiyatı
   });
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("trendyolSettings");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const isOrg = parsed.organicSalesMode !== undefined
-            ? Boolean(parsed.organicSalesMode)
-            : false;
-        setSettings(prev => ({
-          ...DEFAULT_TRENDYOL_SETTINGS,
-          ...parsed,
-          organicSalesMode: isOrg,
-          advertisingRate: isOrg ? 0 : (parsed.advertisingRate ?? 8),
-        }));
-      }
-    } catch { /* ignore */ }
-  }, []);
-
-  useEffect(() => {
+    let initialProducts: TrendyolProduct[] = [];
     const saved = localStorage.getItem("trendyolProducts");
     if (saved) {
-      try { setProducts(JSON.parse(saved)); }
-      catch { /* ignore */ }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) initialProducts = parsed;
+      } catch { /* ignore */ }
     }
+
+    // Fiyatlandırma sayfasından yönlendirme parametrelerini otomatik oku ve hesapla
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      const w = sp.get("weight");
+      const name = sp.get("name");
+
+      if (w || name) {
+        const pName = name?.trim() || "Fiyatlandırma Ürünü";
+        const numWeight = parseFloat(w || "100") || 100;
+        const numQty = parseInt(sp.get("qty") || "1") || 1;
+        const candle = sp.get("candle") === "1";
+        const keychain = sp.get("keychain") === "1";
+        const soap = sp.get("soap") === "1";
+        const simPriceParam = sp.get("simPrice") || sp.get("price");
+        const cargoParam = sp.get("cargo");
+
+        setProductName(pName);
+        setWeightGrams(String(numWeight));
+        setQuantity(String(numQty));
+        setPendingFlags({ isCandleholder: candle, isKeychain: keychain, isSoapdish: soap });
+
+        if (cargoParam) {
+          upd({ cargoCompany: cargoParam });
+        }
+
+        const newId = Date.now().toString();
+        const fromName = detectProductTypeFlags(pName);
+        const newProd: TrendyolProduct = {
+          id: newId,
+          productName: pName,
+          weightGrams: numWeight,
+          quantity: numQty,
+          isCandleholder: candle || fromName.isCandleholder,
+          isKeychain: keychain || fromName.isKeychain,
+          isSoapdish: soap || fromName.isSoapdish,
+        };
+
+        if (simPriceParam && !isNaN(parseFloat(simPriceParam)) && parseFloat(simPriceParam) > 0) {
+          setCustomPrices(prev => ({ ...prev, [newId]: simPriceParam }));
+        }
+
+        const filtered = initialProducts.filter(
+          item => !(item.productName.toLowerCase() === pName.toLowerCase() && item.weightGrams === numWeight && item.quantity === numQty)
+        );
+        initialProducts = [newProd, ...filtered];
+
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.search = "";
+        window.history.replaceState({}, "", cleanUrl.pathname);
+
+        toast({
+          title: "Ürün Aktarıldı ve Hesaplandı",
+          description: `"${pName}" (${numWeight}g) fiyatlandırma paneliyle otomatik hesaplandı.`,
+        });
+      }
+    }
+
+    setProducts(initialProducts);
   }, []);
 
   // Click outside to close suggestions
@@ -1288,16 +1408,27 @@ export function TrendyolCalculatorClient() {
                                 {extraPerUnit > 0 && <div>Ekstra: ₺{(extraPerUnit * qty).toFixed(2)}</div>}
                               </div>
                             </div>
-                            <div className="rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 p-2 text-center">
-                              <p className="text-xs text-green-600 font-semibold">
-                                {hasActualPrice ? "Gerçek Satış Fiyatın" : product.quantity > 1 ? `${product.quantity}'li Set Fiyatı` : "Önerilen Fiyat"}
-                              </p>
-                              <p className="font-bold text-green-700 dark:text-green-300 text-lg">₺{activePrice}</p>
-                              {hasActualPrice
-                                ? <p className="text-xs text-blue-500">Öneri: ₺{pr.recommendedPrice}</p>
-                                : <p className="text-xs text-green-500">%{settings.profitMargin} net kâr (fiyattan)</p>
-                              }
-                              <p className="text-xs text-purple-600 font-semibold mt-0.5">KDV sonrası: ₺{bd.netProfitAfterVat.toFixed(2)}</p>
+                            <div className="rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 p-2 text-center flex flex-col justify-between">
+                              <div>
+                                <p className="text-xs text-green-600 font-semibold">
+                                  {hasActualPrice ? "Gerçek Satış Fiyatın" : product.quantity > 1 ? `${product.quantity}'li Set Fiyatı` : "Hedef Satış Fiyatı"}
+                                </p>
+                                <p className="font-bold text-green-700 dark:text-green-300 text-lg">₺{activePrice}</p>
+                                {settings.useCampaignPricing && settings.campaignDiscountRate > 0 && (
+                                  <div className="text-[11px] bg-amber-100/80 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 rounded px-1.5 py-0.5 mt-0.5 border border-amber-300/60 inline-block font-medium">
+                                    Giriş Liste Fiyatı: <span className="line-through font-bold">₺{Math.ceil(activePrice / (1 - settings.campaignDiscountRate / 100))}</span>
+                                    <span className="text-[10px] ml-1 text-emerald-700 dark:text-emerald-400 font-semibold">(-%{settings.campaignDiscountRate})</span>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="mt-1 pt-1 border-t border-green-200 dark:border-green-800/60">
+                                <p className="text-[11px] text-green-700 dark:text-green-400 font-medium">
+                                  %{settings.profitMargin} Net Kâr Hedefi
+                                </p>
+                                <p className="text-xs text-purple-600 dark:text-purple-400 font-bold">
+                                  Kâr: ₺{bd.netProfitAfterVat.toFixed(2)} (%{(activePrice > 0 ? (bd.netProfitAfterVat / activePrice) * 100 : 0).toFixed(1)})
+                                </p>
+                              </div>
                             </div>
                           </div>
 
@@ -1378,85 +1509,67 @@ export function TrendyolCalculatorClient() {
 
                           {/* ── BAREM OPTİMİZASYONU ── */}
                           {(() => {
-                            // targetPrice = hedef kâr marjına göre hesaplanan fiyat (barem öncesi)
-                            // recommendedPrice = barem optimizasyonu sonrası gerçek öneri (₺199 olabilir)
                             const baseRecommended = pr.recommendedPrice;
-                            const scenarios = calcBaremOptimization(pc, product.weightGrams * qty, settings, baseRecommended);
-                            const under200sc = scenarios.find(s => s.band === "under200");
-                            const equivSc = scenarios.find(s => s.label.startsWith("Eşdeğer"));
-                            if (!under200sc) return null;
-                            const net199 = under200sc.netProfit;
-                            const optimal = scenarios.find(s => s.isOptimal);
-                            // En iyi senaryo varsayılır; yoksa barem altı
-                            const displayRecommended = optimal ?? under200sc;
-                            const baremAltiBetter = under200sc.isOptimal;
-                            // Barem altı zarar mı ediyor?
-                            const under200InLoss = net199 < 0;
-                            // Eşdeğer fiyat: 199'da zarar varsa "zarar sıfırlanma noktası",
-                            // yoksa "aynı kâr noktası" anlamına gelir
-                            const equivLabel = under200InLoss
-                              ? `Barem altı zaten zarar (₺${net199.toFixed(2)})`
-                              : `₺199 ile aynı kâr noktası: ₺${equivSc?.price ?? "—"}`;
+                            const optResult = calcBaremOptimization(pc, product.weightGrams * qty, settings, baseRecommended);
+                            const { scenarios, equivPriceInBarem2, netProfit199 } = optResult;
+                            const is199Recommended = baseRecommended <= 199;
+                            const under200InLoss = netProfit199 < 0;
 
                             return (
-                              <div className={`rounded-lg border-2 p-3 space-y-3 ${baremAltiBetter
-                                ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-400 dark:border-emerald-600"
-                                : "bg-slate-50 dark:bg-slate-900/30 border-slate-300 dark:border-slate-700"}`}>
-
+                              <div className="rounded-lg border-2 p-3 space-y-3 bg-slate-50 dark:bg-slate-900/30 border-slate-300 dark:border-slate-700">
                                 {/* Başlık */}
                                 <div className="flex items-center justify-between flex-wrap gap-2">
-                                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                                    📊 Barem Optimizasyonu
-                                  </p>
-                                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${baremAltiBetter
-                                    ? "bg-emerald-500 text-white"
-                                    : under200InLoss
-                                      ? "bg-red-500 text-white"
-                                      : "bg-blue-500 text-white"}`}>
-                                    {baremAltiBetter
-                                      ? "⬇️ Düşük fiyat daha kârlı"
-                                      : under200InLoss
-                                        ? "🚫 Barem altı kârsız"
-                                        : "⬆️ Yüksek fiyat daha kârlı"}
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-base">📊</span>
+                                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                                      Barem Stratejisi & Kargo Analizi
+                                    </p>
+                                  </div>
+                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                                    is199Recommended
+                                      ? "bg-emerald-500 text-white"
+                                      : "bg-blue-600 text-white"
+                                  }`}>
+                                    {is199Recommended ? "⚡ Barem 1 Öneriliyor" : "🎯 Barem 2 Öneriliyor"}
                                   </span>
                                 </div>
 
                                 {/* Senaryo Kartları */}
                                 <div className="space-y-1.5">
                                   {scenarios.map((sc, idx) => {
-                                    const isEquiv = sc.label.startsWith("Eşdeğer");
                                     const isUnder200 = sc.band === "under200";
                                     const isZarar = sc.netProfit < 0;
                                     return (
-                                      <div key={idx} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs border transition-colors
-                                        ${sc.isOptimal
-                                          ? "bg-emerald-100 dark:bg-emerald-900/50 border-emerald-400 dark:border-emerald-600 shadow-sm"
-                                          : isZarar
+                                      <div
+                                        key={idx}
+                                        className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs border transition-colors ${
+                                          sc.isRecommended
+                                            ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 dark:border-emerald-600 shadow-sm ring-1 ring-emerald-400/30"
+                                            : isZarar
                                             ? "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800 opacity-80"
-                                            : isEquiv
-                                              ? "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700"
-                                              : "bg-white/80 dark:bg-gray-900/40 border-border"}`}>
-                                        <span className="text-base w-5 text-center shrink-0">
-                                          {sc.isOptimal ? "✅" : isZarar ? "❌" : isEquiv ? "⚖️" : isUnder200 ? "📦" : "📫"}
+                                            : "bg-white dark:bg-gray-900/60 border-border"
+                                        }`}
+                                      >
+                                        <span className="text-base shrink-0">
+                                          {sc.isRecommended ? "✅" : isZarar ? "❌" : isUnder200 ? "📦" : "📫"}
                                         </span>
                                         <div className="flex-1 min-w-0">
-                                          <p className={`font-semibold ${
-                                            sc.isOptimal ? "text-emerald-800 dark:text-emerald-200"
-                                            : isZarar ? "text-red-700 dark:text-red-300"
-                                            : isEquiv ? "text-amber-800 dark:text-amber-200"
-                                            : "text-foreground"}`}>
-                                            {sc.label}
-                                          </p>
-                                          <p className="text-muted-foreground text-[11px] mt-0.5">
-                                            Kargo: <span className="font-medium">₺{sc.shipping.toFixed(2)}</span>
-                                            {sc.exactTargetPrice !== undefined && (
-                                              <span className="ml-2">Tam hedef: ₺{sc.exactTargetPrice.toFixed(2)}</span>
-                                            )}
-                                            {isEquiv && !under200InLoss && (
-                                              <span className="text-amber-600 dark:text-amber-400 ml-1">← bu fiyatın altı 199'dan daha az kârlı</span>
-                                            )}
-                                            {isEquiv && under200InLoss && (
-                                              <span className="text-red-500 ml-1">← zarar sıfırlanma noktası</span>
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <p className={`font-bold ${
+                                              sc.isRecommended ? "text-emerald-800 dark:text-emerald-300" : "text-foreground"
+                                            }`}>
+                                              {sc.label}
+                                            </p>
+                                            <span className={`text-[10px] px-1.5 py-0.2 rounded ${sc.badgeColor || "bg-muted text-muted-foreground"}`}>
+                                              {sc.tag}
+                                            </span>
+                                          </div>
+                                          <p className="text-muted-foreground text-[11px] mt-0.5 flex items-center gap-2 flex-wrap">
+                                            <span>Kargo: <span className="font-semibold text-foreground">₺{sc.shipping.toFixed(2)}</span></span>
+                                            {settings.useCampaignPricing && settings.campaignDiscountRate > 0 && (
+                                              <span className="text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-1 rounded border border-amber-200 dark:border-amber-800">
+                                                Giriş Liste: <strong className="line-through">₺{Math.ceil(sc.price / (1 - settings.campaignDiscountRate / 100))}</strong>
+                                              </span>
                                             )}
                                           </p>
                                         </div>
@@ -1477,36 +1590,25 @@ export function TrendyolCalculatorClient() {
                                   })}
                                 </div>
 
-                                {/* Açıklama */}
-                                <div className={`rounded p-2.5 text-[11px] space-y-1 ${
-                                  under200InLoss
-                                    ? "bg-red-50 dark:bg-red-950/30 text-red-800 dark:text-red-200"
-                                    : baremAltiBetter
-                                      ? "bg-emerald-100/70 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200"
-                                      : "bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-200"}`}>
-                                  {under200InLoss ? (
-                                    <>
-                                      <p>🚫 <strong>₺199</strong>'da satmak zarar (₺{net199.toFixed(2)}). Barem altı bu ürün için uygun değil.</p>
-                                      {equivSc && <p>⚖️ Barem üstünde en az <strong>₺{equivSc.price}</strong>'dan satmalısın (başabaş noktası).</p>}
-                                      <p>✅ Önerilen <strong>₺{displayRecommended.price}</strong> → kâr ₺{displayRecommended.netProfit.toFixed(2)} (%{displayRecommended.netMarginOnPrice.toFixed(1)}).</p>
-                                    </>
-                                  ) : pr.recommendedPrice <= 199 ? (
-                                    <>
-                                      <p>✅ %{settings.profitMargin} kâr hedefin için <strong>₺{pr.exactTargetPrice.toFixed(2)}</strong>'den satman yeterli — barem altı kargo (₺{under200sc.shipping.toFixed(2)}) sayesinde.</p>
-                                      <p className="opacity-75">💡 ₺199'a çıkarsan kârın %{under200sc.netMarginOnPrice.toFixed(1)}'e (₺{net199.toFixed(2)}) yükselir.</p>
-                                    </>
-                                  ) : baremAltiBetter ? (
-                                    <>
-                                      <p>✅ <strong>₺199</strong>'da sat — düşük kargo (₺{under200sc.shipping.toFixed(2)}), net kâr daha yüksek.</p>
-                                      <p className="opacity-75">💡 %{settings.profitMargin} kâr hedefin için en az <strong>₺{pr.exactTargetPrice.toFixed(2)}</strong>'den satman gerekir (kargo ₺{scenarios.find(s => s.label.startsWith("Önerilen"))?.shipping.toFixed(2) ?? "—"}).</p>
-                                      {equivSc && <p>⚖️ Barem üstünde <strong>₺{equivSc.price}</strong> üstünde olursa önerilen fiyat daha kârlı.</p>}
-                                    </>
-                                  ) : (
-                                    <>
-                                      <p>⚖️ {equivLabel}</p>
-                                      <p>📈 Önerilen <strong>₺{optimal?.price ?? 0}</strong> — Kargo: ₺{(optimal?.shipping ?? 0).toFixed(2)} → kâr ₺{(optimal?.netProfit ?? 0).toFixed(2)} (%{(optimal?.netMarginOnPrice ?? 0).toFixed(1)}) ({(optimal?.profitDiff ?? 0) >= 0 ? "+" : ""}₺{(optimal?.profitDiff ?? 0).toFixed(2)})</p>
-                                    </>
+                                {/* Strateji İpuçları Kutusu */}
+                                <div className="rounded p-2.5 text-[11px] space-y-1.5 bg-blue-50/80 dark:bg-blue-950/30 text-blue-900 dark:text-blue-200 border border-blue-200 dark:border-blue-800/60">
+                                  {equivPriceInBarem2 && equivPriceInBarem2 > 200 && equivPriceInBarem2 <= 349 && (
+                                    <p>
+                                      ⚠️ <strong>Kargo Tuzağı Uyarısı:</strong> ₺200 ile ₺{equivPriceInBarem2} arasında fiyat belirlemeyin. Kargo ücreti ₺46.49'dan ₺84.49'a çıktığı için bu aralıkta satmak ₺199'da satmaktan <strong>daha az kâr</strong> bırakır.
+                                    </p>
                                   )}
+                                  {is199Recommended ? (
+                                    <p>
+                                      ⚡ <strong>Barem 1 Avantajı:</strong> Kargo sadece ₺46.49 olduğu için <strong>₺199</strong> fiyatı yüksek satış hızı ve risksiz kâr sağlar.
+                                    </p>
+                                  ) : (
+                                    <p>
+                                      🎯 <strong>Önerilen Fiyat:</strong> %{settings.profitMargin} net kâr hedefiniz için <strong>₺{baseRecommended}</strong> (Barem 2) ideal dengededir. Fiyatı ₺349 tavanına kadar güvenle artırabilirsiniz.
+                                    </p>
+                                  )}
+                                  <p className="text-[10px] opacity-80">
+                                    💡 ₺350 ve üzerinde standart desi kargosu (₺93.05+) devreye girer. Bu ürün için en avantajlı tavan <strong>₺349</strong>'dur.
+                                  </p>
                                 </div>
                               </div>
                             );
@@ -1764,6 +1866,46 @@ export function TrendyolCalculatorClient() {
 
                     {numInput("t4", "Kutulama (TL/sipariş)", "packagingCost", "0.5")}
                     {numInput("t5", "Hedef Net Kâr (%)", "profitMargin", "1", "Satış fiyatının bu yüzdesi net kâr olarak kalır")}
+                  </section>
+
+                  <div className="border-t" />
+
+                  {/* Kampanya & İndirim Stratejisi */}
+                  <section className="space-y-3">
+                    <p className="text-sm font-semibold text-purple-600 flex items-center gap-1.5">
+                      🏷️ Kampanya & İndirim Stratejisi
+                    </p>
+                    <div className="flex items-center gap-2 p-2.5 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg">
+                      <input
+                        type="checkbox"
+                        id="useCampaignPricing"
+                        checked={settings.useCampaignPricing}
+                        onChange={e => upd({ useCampaignPricing: e.target.checked })}
+                        className="w-4 h-4 text-purple-600 rounded"
+                      />
+                      <Label htmlFor="useCampaignPricing" className="cursor-pointer text-xs font-semibold text-purple-900 dark:text-purple-200">
+                        Yüksek Liste Fiyatı + Kampanya İndirimi
+                      </Label>
+                    </div>
+                    {settings.useCampaignPricing && (
+                      <div className="space-y-2 p-2.5 bg-muted/30 border rounded-lg">
+                        <Label htmlFor="campaignDiscountRate" className="text-xs font-medium">
+                          Kampanya / Kupon İndirim Oranı (%)
+                        </Label>
+                        <Input
+                          id="campaignDiscountRate"
+                          type="number"
+                          step="1"
+                          min="1"
+                          max="90"
+                          value={settings.campaignDiscountRate ?? 10}
+                          onChange={e => upd({ campaignDiscountRate: parseFloat(e.target.value) || 0 })}
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                          Trendyol'a gireceğiniz <strong>Üstü Çizili Liste Fiyatı</strong> otomatik hesaplanır. Müşteri %{settings.campaignDiscountRate} indirimle aldığında elinize tam hedeflediğiniz tutar geçer.
+                        </p>
+                      </div>
+                    )}
                   </section>
 
                   <div className="border-t" />

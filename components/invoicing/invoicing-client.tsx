@@ -342,63 +342,36 @@ export function InvoicingClient() {
         </div>
       </div>
 
-      {/* Sync Butonları */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-        <button
-          onClick={() => handleSync(7)}
-          disabled={syncing || loading}
-          className="flex flex-col items-center gap-3 p-6 bg-card border border-border rounded-2xl hover:shadow-lg hover:border-blue-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed group cursor-pointer"
-        >
-          <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center group-hover:bg-blue-500/20 transition-colors">
-            <Calendar className="w-6 h-6 text-blue-500" />
+      {/* Trendyol Senkronizasyon Çubuğu */}
+      <div className="bg-card border border-border rounded-2xl p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-orange-500/10 text-orange-600 flex items-center justify-center shrink-0">
+            <RefreshCw className={`w-5 h-5 ${syncing ? "animate-spin" : ""}`} />
           </div>
-          <div className="text-center">
-            <p className="font-semibold text-foreground">Son 7 Gün</p>
-            <p className="text-xs text-muted-foreground">Hızlı sync</p>
+          <div>
+            <p className="text-sm font-bold text-foreground">Trendyol Sipariş Senkronizasyonu</p>
+            <p className="text-xs text-muted-foreground">Teslim edilmiş siparişleri ve fatura durumlarını çekin</p>
           </div>
-        </button>
+        </div>
 
-        <button
-          onClick={() => handleSync(30)}
-          disabled={syncing || loading}
-          className="flex flex-col items-center gap-3 p-6 bg-card border border-border rounded-2xl hover:shadow-lg hover:border-violet-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed group cursor-pointer"
-        >
-          <div className="w-12 h-12 rounded-xl bg-violet-500/10 flex items-center justify-center group-hover:bg-violet-500/20 transition-colors">
-            <Calendar className="w-6 h-6 text-violet-500" />
-          </div>
-          <div className="text-center">
-            <p className="font-semibold text-foreground">Son 30 Gün</p>
-            <p className="text-xs text-muted-foreground">Aylık sync</p>
-          </div>
-        </button>
-
-        <button
-          onClick={() => handleSync(90)}
-          disabled={syncing || loading}
-          className="flex flex-col items-center gap-3 p-6 bg-card border border-border rounded-2xl hover:shadow-lg hover:border-amber-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed group cursor-pointer"
-        >
-          <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center group-hover:bg-amber-500/20 transition-colors">
-            <Calendar className="w-6 h-6 text-amber-500" />
-          </div>
-          <div className="text-center">
-            <p className="font-semibold text-foreground">Son 90 Gün</p>
-            <p className="text-xs text-muted-foreground">Çeyrek sync</p>
-          </div>
-        </button>
-
-        <button
-          onClick={() => handleSync(365)}
-          disabled={syncing || loading}
-          className="flex flex-col items-center gap-3 p-6 bg-card border border-border rounded-2xl hover:shadow-lg hover:border-emerald-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed group cursor-pointer"
-        >
-          <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center group-hover:bg-emerald-500/20 transition-colors">
-            <Download className="w-6 h-6 text-emerald-500" />
-          </div>
-          <div className="text-center">
-            <p className="font-semibold text-foreground">Son 1 Yıl</p>
-            <p className="text-xs text-muted-foreground">Tam sync</p>
-          </div>
-        </button>
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+          <span className="text-xs text-muted-foreground mr-1 hidden md:inline font-medium">Aralık:</span>
+          {[
+            { days: 7, label: "Son 7 Gün" },
+            { days: 30, label: "Son 30 Gün" },
+            { days: 90, label: "Son 90 Gün" },
+            { days: 365, label: "Son 1 Yıl" },
+          ].map((item) => (
+            <button
+              key={item.days}
+              onClick={() => handleSync(item.days)}
+              disabled={syncing || loading}
+              className="px-3 py-1.5 rounded-xl border border-border bg-muted/40 hover:bg-muted text-xs font-semibold text-foreground transition-all disabled:opacity-50 whitespace-nowrap active:scale-95 cursor-pointer"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Syncing Progress */}

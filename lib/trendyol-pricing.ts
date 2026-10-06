@@ -18,6 +18,9 @@ export interface TrendyolPricingSettings {
   fixedCostPerOrder: number;
   organicSalesMode: boolean;
   profitMargin: number;
+  // Kampanya / İndirimli Fiyatlandırma
+  campaignDiscountRate?: number;
+  useCampaignPricing?: boolean;
   // Ekstra malzeme sabit ücretleri (ürün tipi başına)
   candleholderCostPerUnit?: number;
   keychainCostPerUnit?: number;
@@ -34,11 +37,13 @@ export const DEFAULT_TRENDYOL_PRICING_SETTINGS: TrendyolPricingSettings = {
   packagingCost: 15,
   platformFeeBase: 10.99,
   fastShipping: true,
-  advertisingRate: 0,
+  advertisingRate: 8,
   returnRate: 12,
   fixedCostPerOrder: 33.33,
-  organicSalesMode: true,
+  organicSalesMode: false,
   profitMargin: 10,
+  campaignDiscountRate: 10,
+  useCampaignPricing: true,
   candleholderCostPerUnit: 0,
   keychainCostPerUnit: 2,
   soapdishCostPerUnit: 0,
@@ -53,6 +58,8 @@ export interface TrendyolPricingResult {
   targetPrice: number;
   exactTargetPrice: number;
   breakEvenPrice: number;
+  listPrice: number;            // Üstü çizili girilecek liste fiyatı (kampanya öncesi)
+  campaignDiscountRate: number; // Uygulanan indirim oranı %
 }
 
 /**
@@ -124,38 +131,50 @@ export function calcTrendyolPrice(
   const p3 = calcPriceForShipping(shippingStandart, productionCost, weightGrams, settings, m);
   const be3 = calcPriceForShipping(shippingStandart, productionCost, weightGrams, settings, 0);
 
-  // En uygun hedef fiyat seçimi
+  // En uygun hedef ve başabaş fiyat seçimi
   let exactTargetPrice = p3;
-  if (isFinite(priceUnder200)) {
+  if (isFinite(priceUnder200) && priceUnder200 <= 199) {
     exactTargetPrice = priceUnder200;
-  } else if (isFinite(price200to350)) {
+  } else if (isFinite(price200to350) && price200to350 >= 200 && price200to350 < 350) {
     exactTargetPrice = price200to350;
-  }
-
-  let breakEvenPriceVal = be3;
-  if (isFinite(breakEvenUnder200)) {
-    breakEvenPriceVal = breakEvenUnder200;
-  } else if (isFinite(breakEven200to350)) {
-    breakEvenPriceVal = breakEven200to350;
+  } else {
+    exactTargetPrice = p3;
   }
 
   let targetPriceRounded = Math.ceil(exactTargetPrice);
   let recommendedPrice = targetPriceRounded;
 
-  // Barem Optimizasyonu: 199 TL tavanı önerisi
-  if (desi < 10 && targetPriceRounded > 199) {
+  if (desi < 10) {
     const bd199 = calcTrendyolBreakdownAtPrice(199, productionCost, weightGrams, settings);
-    const bdTarget = calcTrendyolBreakdownAtPrice(targetPriceRounded, productionCost, weightGrams, settings);
-    if (bd199.netProfitAfterVat > bdTarget.netProfitAfterVat) {
+
+    // Barem 1 optimizasyonu: Eğer hedef fiyat 200-225 TL arasındaysa ve 199 TL kârlıysa 199 TL öner
+    if (targetPriceRounded >= 200 && targetPriceRounded <= 225 && bd199.netProfitAfterVat > 0) {
       recommendedPrice = 199;
     }
   }
+
+  // Başabaş fiyatı: En düşük geçerli barem kargosuyla hesaplanır
+  let breakEvenPriceVal = be3;
+  if (desi < 10) {
+    if (isFinite(breakEvenUnder200) && breakEvenUnder200 <= 199) {
+      breakEvenPriceVal = breakEvenUnder200;
+    } else if (isFinite(breakEven200to350) && breakEven200to350 < 350) {
+      breakEvenPriceVal = breakEven200to350;
+    }
+  }
+
+  const discountRate = settings.useCampaignPricing !== false ? (settings.campaignDiscountRate ?? 10) : 0;
+  const listPrice = discountRate > 0 && discountRate < 100
+    ? Math.ceil(recommendedPrice / (1 - discountRate / 100))
+    : recommendedPrice;
 
   return {
     recommendedPrice,
     targetPrice: targetPriceRounded,
     exactTargetPrice,
     breakEvenPrice: Math.ceil(breakEvenPriceVal),
+    listPrice,
+    campaignDiscountRate: discountRate,
   };
 }
 

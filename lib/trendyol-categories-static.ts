@@ -69,7 +69,9 @@ export const TRENDYOL_CATEGORIES_TR: TrendyolCategoryNode[] = [
   {
     id: 200, name: "Ev & Yaşam", parentId: null, subCategories: [
       { id: 201, name: "Ev Dekorasyon", parentId: 200, subCategories: [
-        { id: 202, name: "Vazo", parentId: 201, subCategories: [] },
+        { id: 833, name: "Figür", parentId: 201, subCategories: [] },
+        { id: 1881, name: "Vazo", parentId: 201, subCategories: [] },
+        { id: 202, name: "Saksı", parentId: 201, subCategories: [] },
         { id: 203, name: "Mumluk & Mumluk Seti", parentId: 201, subCategories: [] },
         { id: 204, name: "Tablo & Çerçeve", parentId: 201, subCategories: [] },
         { id: 205, name: "Heykel & Figür", parentId: 201, subCategories: [] },
@@ -244,3 +246,74 @@ export const TRENDYOL_CATEGORIES_TR: TrendyolCategoryNode[] = [
     ]
   },
 ];
+
+/**
+ * Ürün başlığı veya mevcut ID'ye göre akıllı Trendyol kategori tespiti
+ */
+export function detectCategoryFromProduct(item: {
+  category_id?: string | number | null;
+  categoryName?: string | null;
+  category_name?: string | null;
+  title?: string | null;
+}): { id: number; name: string } {
+  const cId = Number(item.category_id);
+  const catName = item.categoryName || item.category_name;
+
+  // 1. Kullanıcı açıkça bir kategori ID veya isim seçtiyse ÖNCELİKLE KULLANICININ SEÇİMİNE SAYGI DUY
+  if (cId && !isNaN(cId) && cId > 0) {
+    if (cId === 833) return { id: 833, name: catName || "Figür" };
+    if (cId === 1877) return { id: 1877, name: catName || "Dekoratif Obje ve Biblo" };
+    if (cId === 2314) return { id: 2314, name: catName || "Dekoratif Obje / Heykel" };
+    if (cId === 2318) return { id: 2318, name: catName || "Dekoratif Figür & Obje" };
+    if (cId === 890) return { id: 890, name: catName || "Biblo" };
+    if (cId === 1881) return { id: 1881, name: catName || "Vazo" };
+    if (cId === 202) return { id: 202, name: catName || "Saksı" };
+    if (cId === 1882) return { id: 1882, name: catName || "Mum ve Mumluk" };
+    if (cId === 204) return { id: 204, name: catName || "Tablo ve Çerçeve" };
+    if (cId === 203) return { id: 203, name: catName || "Dekoratif Obje" };
+    return { id: cId, name: catName || "Kategori" };
+  }
+
+  if (catName && catName.trim().length > 0) {
+    return { id: cId || 1877, name: catName.trim() };
+  }
+
+  // 2. Kategori seçilmediyse başlığa göre akıllı tahmin yap
+  const titleLower = (item.title || "").toLowerCase();
+
+  if (titleLower.includes("vazo") || titleLower.includes("vase")) {
+    return { id: 1881, name: "Vazo" };
+  }
+  if (titleLower.includes("saksı") || titleLower.includes("saksi")) {
+    return { id: 202, name: "Saksı" };
+  }
+  if (
+    titleLower.includes("mumluk") ||
+    titleLower.includes("şamdan") ||
+    titleLower.includes("samdan") ||
+    titleLower.includes("mum")
+  ) {
+    return { id: 1882, name: "Mum ve Mumluk" };
+  }
+  if (titleLower.includes("tablo") || titleLower.includes("çerçeve")) {
+    return { id: 204, name: "Tablo ve Çerçeve" };
+  }
+
+  if (
+    titleLower.includes("figür") ||
+    titleLower.includes("figur") ||
+    titleLower.includes("karakter") ||
+    titleLower.includes("anime") ||
+    titleLower.includes("gojo") ||
+    titleLower.includes("jujutsu")
+  ) {
+    return { id: 833, name: "Figür" };
+  }
+
+  if (titleLower.includes("biblo") || titleLower.includes("dekoratif") || titleLower.includes("heykel")) {
+    return { id: 1877, name: "Dekoratif Obje ve Biblo" };
+  }
+
+  return { id: 1877, name: "Dekoratif Obje ve Biblo" };
+}
+

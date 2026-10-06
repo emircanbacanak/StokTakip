@@ -4,18 +4,16 @@ import { runGibBrowserAutomation } from "@/lib/gib-browser-automation";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { username, password, orders } = body;
-
-    if (!orders || orders.length === 0) {
-      return NextResponse.json({ error: "İşlenecek sipariş bulunamadı" }, { status: 400 });
-    }
+    const { username, password, orders, skipCreation } = body;
 
     // Arka planda veya canlı tarayıcıyı başlat
     const result = await runGibBrowserAutomation({
-      username: username || "12911762",
-      password: password || "973973",
-      orders,
+      username: username || process.env.GIB_USERNAME || "",
+      password: password || process.env.GIB_PASSWORD || "",
+      orders: orders || [],
+      skipCreation: Boolean(skipCreation || (!orders || orders.length === 0)),
     });
+
 
     return NextResponse.json(result);
   } catch (error) {

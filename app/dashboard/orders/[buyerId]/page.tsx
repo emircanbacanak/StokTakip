@@ -5,7 +5,15 @@ export default async function BuyerOrdersPage({ params }: { params: Promise<{ bu
   const { buyerId } = await params;
   
   return (
-    <DashboardLayout title="Siparişler" subtitle="">
+    <DashboardLayout
+      title="Alıcı Sipariş Detayı"
+      subtitle="Seçili alıcıya ait siparişler ve üretim durumları"
+      backHref="/dashboard/orders"
+      breadcrumbs={[
+        { label: "Siparişler", href: "/dashboard/orders" },
+        { label: "Alıcı Detayı" },
+      ]}
+    >
       <BuyerOrdersClient buyerId={buyerId} />
     </DashboardLayout>
   );

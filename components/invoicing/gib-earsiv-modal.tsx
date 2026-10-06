@@ -20,8 +20,8 @@ interface GibEarsivModalProps {
 
 export function GibEarsivModal({ orders, onClose, onSuccess }: GibEarsivModalProps) {
   const [step, setStep] = useState<"login" | "sms" | "processing" | "success">("login");
-  const [username, setUsername] = useState("12911762");
-  const [password, setPassword] = useState("973973");
+  const [username, setUsername] = useState(process.env.NEXT_PUBLIC_GIB_USERNAME || "");
+  const [password, setPassword] = useState(process.env.NEXT_PUBLIC_GIB_PASSWORD || "");
   const [smsCode, setSmsCode] = useState("");
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(false);
@@ -154,6 +154,8 @@ export function GibEarsivModal({ orders, onClose, onSuccess }: GibEarsivModalPro
     setLoading(false);
   };
 
+  const [pdfInfo, setPdfInfo] = useState<{ outputDir?: string; count?: number; trendyolCount?: number }>({});
+
   const handleLaunchLiveBrowser = async () => {
     setLoading(true);
     setStep("processing");
@@ -187,6 +189,12 @@ export function GibEarsivModal({ orders, onClose, onSuccess }: GibEarsivModalPro
           })
           .eq("id", ord.id);
       }
+
+      setPdfInfo({
+        outputDir: data.pdfOutputDir,
+        count: data.downloadedPdfs?.length || 0,
+        trendyolCount: data.trendyolUploadedCount || 0,
+      });
 
       setResults({
         successCount: data.successCount || orders.length,
@@ -251,8 +259,7 @@ export function GibEarsivModal({ orders, onClose, onSuccess }: GibEarsivModalPro
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    required
-                    placeholder="12911762"
+                    placeholder="GİB Kodu (Boş bırakılırsa .env kullanılır)"
                     className="w-full pl-10 pr-4 py-2.5 bg-background border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
                 </div>
@@ -268,8 +275,7 @@ export function GibEarsivModal({ orders, onClose, onSuccess }: GibEarsivModalPro
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    required
-                    placeholder="••••••"
+                    placeholder="Şifre (Boş bırakılırsa .env kullanılır)"
                     className="w-full pl-10 pr-4 py-2.5 bg-background border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
                 </div>
@@ -292,7 +298,7 @@ export function GibEarsivModal({ orders, onClose, onSuccess }: GibEarsivModalPro
                 ) : (
                   <>
                     <span className="text-base">🌐</span>
-                    Canlı Tarayıcı Aç (Ekranda Sırayla Doldursun)
+                    Canlı Tarayıcı Aç (İmzala, İndir ve Trendyol'a Yükle)
                   </>
                 )}
               </button>
@@ -377,10 +383,22 @@ export function GibEarsivModal({ orders, onClose, onSuccess }: GibEarsivModalPro
               <CheckCircle2 className="w-9 h-9 text-emerald-500" />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-foreground">İşlem Tamamlandı!</h3>
+              <h3 className="text-xl font-bold text-foreground">İşlem Başarıyla Tamamlandı!</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                ✅ <strong>{results.successCount}</strong> adet fatura başarıyla GİB e-Arşiv Taslaklar'a aktarıldı.
+                ✅ <strong>{results.successCount}</strong> adet fatura başarıyla GİB e-Arşiv sisteminde oluşturuldu.
               </p>
+              {pdfInfo.count ? (
+                <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-xs text-blue-600 dark:text-blue-400">
+                  📄 <strong>{pdfInfo.count} adet PDF fatura</strong> kişi adı-soyadı ile kaydedildi.<br />
+                  📂 <strong>Klasör:</strong> {pdfInfo.outputDir || "downloads/faturalar"}
+                </div>
+              ) : null}
+              {pdfInfo.trendyolCount ? (
+                <div className="mt-2 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
+                  <span>🚀</span>
+                  <span><strong>{pdfInfo.trendyolCount} adet fatura</strong> Trendyol Partner sistemine başarıyla yüklendi!</span>
+                </div>
+              ) : null}
               {results.failCount > 0 && (
                 <p className="text-xs text-red-500 mt-1">
                   ⚠️ {results.failCount} adet siparişte hata oluştu.
@@ -411,3 +429,5 @@ export function GibEarsivModal({ orders, onClose, onSuccess }: GibEarsivModalPro
     </div>
   );
 }
+
+

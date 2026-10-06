@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Plus, Trash2, ShoppingBag, Package, ChevronRight } from "lucide-react";
+import { Plus, Trash2, ShoppingBag, Package, ChevronRight, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -99,6 +99,7 @@ export function OrdersClient() {
   const [newOpen, setNewOpen] = useState(false);
   const [selected, setSelected] = useState<Order | null>(null);
   const [activeTab, setActiveTab] = useState<OrderStatus | "all">("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const { toast } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
 
@@ -219,10 +220,27 @@ export function OrdersClient() {
   const groups: BuyerGroup[] = [];
   const seen: Record<string, BuyerGroup> = {};
   
-  // Tab'a göre filtrele
-  const filteredOrders = activeTab === "all" 
+  // Durum Sayaçları
+  const counts = {
+    all: orders.filter(o => o.status !== "delivered").length,
+    pending: orders.filter(o => o.status === "pending").length,
+    in_production: orders.filter(o => o.status === "in_production").length,
+    completed: orders.filter(o => o.status === "completed").length,
+    delivered: orders.filter(o => o.status === "delivered").length,
+  };
+
+  // Tab ve Arama Filtresi
+  const filteredOrders = (activeTab === "all" 
     ? orders.filter(o => o.status !== "delivered") // "Tümü" seçeneği: delivered hariç tümü
-    : orders.filter(o => o.status === activeTab);
+    : orders.filter(o => o.status === activeTab)
+  ).filter((o) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+    return (
+      o.buyer.name.toLowerCase().includes(q) ||
+      o.items.some(i => i.product_name.toLowerCase().includes(q))
+    );
+  });
   
   filteredOrders.forEach((o) => {
     if (!seen[o.buyer.id]) {
@@ -261,89 +279,116 @@ export function OrdersClient() {
     }, 0);
   };
 
+  const tabsConfig = [
+    { id: "all", label: "Tümü", count: counts.all },
+    { id: "pending", label: "Bekliyor", count: counts.pending },
+    { id: "in_production", label: "Üretimde", count: counts.in_production },
+    { id: "completed", label: "Tamamlandı", count: counts.completed },
+    { id: "delivered", label: "Teslim Edildi", count: counts.delivered },
+  ];
+
   return (
     <div className="space-y-4">
-      {/* Tabs */}
-      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-        <button
-          onClick={() => setActiveTab("all")}
-          className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all ${
-            activeTab === "all"
-              ? "bg-gradient-to-r from-blue-500 to-violet-600 text-white shadow-lg shadow-blue-500/25"
-              : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-blue-500/30"
-          }`}
-        >
-          Tümü
-        </button>
-        <button
-          onClick={() => setActiveTab("pending")}
-          className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all ${
-            activeTab === "pending"
-              ? "bg-amber-500 text-white shadow-lg shadow-amber-500/25"
-              : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-amber-500/30"
-          }`}
-        >
-          Bekliyor
-        </button>
-        <button
-          onClick={() => setActiveTab("in_production")}
-          className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all ${
-            activeTab === "in_production"
-              ? "bg-blue-500 text-white shadow-lg shadow-blue-500/25"
-              : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-blue-500/30"
-          }`}
-        >
-          Üretimde
-        </button>
-        <button
-          onClick={() => setActiveTab("completed")}
-          className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all ${
-            activeTab === "completed"
-              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/25"
-              : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-emerald-500/30"
-          }`}
-        >
-          Tamamlandı
-        </button>
-        <button
-          onClick={() => setActiveTab("delivered")}
-          className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all ${
-            activeTab === "delivered"
-              ? "bg-gray-500 text-white shadow-lg shadow-gray-500/25"
-              : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-gray-500/30"
-          }`}
-        >
-          Teslim Edildi
-        </button>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <p className="text-base text-muted-foreground">{groups.length} alıcı · {orders.length} sipariş</p>
-        <button
-          onClick={() => setNewOpen(true)}
-          className="flex items-center gap-2 bg-gradient-to-r from-blue-500 to-violet-600 text-white font-semibold px-5 py-3 rounded-xl shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
-        >
-          <Plus className="w-5 h-5" /> Yeni Sipariş
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="space-y-3">
-          {[...Array(3)].map((_, i) => <div key={i} className="h-28 bg-card rounded-2xl animate-pulse border border-border" />)}
+      {/* Üst Araç Çubuğu: Arama + Yeni Sipariş */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <div className="relative flex-1 max-w-md">
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Alıcı veya ürün adına göre ara..."
+            className="w-full pl-10 pr-9 py-2 bg-card border border-border rounded-xl text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
-      ) : groups.length === 0 ? (
-        <div className="rounded-2xl border border-border bg-card p-16 text-center">
-          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500/10 to-violet-500/10 flex items-center justify-center mx-auto mb-5">
-            <ShoppingBag className="w-9 h-9 text-blue-500" />
-          </div>
-          <p className="text-lg font-semibold text-foreground mb-2">Henüz sipariş yok</p>
-          <p className="text-base text-muted-foreground mb-6">İlk siparişinizi oluşturun</p>
-          <button onClick={() => setNewOpen(true)} className="bg-gradient-to-r from-blue-500 to-violet-600 text-white font-semibold px-6 py-3 rounded-xl shadow-lg shadow-blue-500/25">
-            Sipariş Oluştur
+
+        <div className="flex items-center gap-2 self-end sm:self-center">
+          <p className="text-xs text-muted-foreground hidden md:block">
+            {groups.length} alıcı · {filteredOrders.length} sipariş
+          </p>
+          <button
+            onClick={() => setNewOpen(true)}
+            className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-md shadow-blue-500/20 active:scale-98 transition-all shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Yeni Sipariş</span>
           </button>
         </div>
-      ) : (
+      </div>
+
+      {/* Durum Sekmeleri (Tabs) */}
+      <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+        {tabsConfig.map((tab) => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border ${
+                isActive
+                  ? "bg-foreground text-background border-foreground shadow-sm"
+                  : "bg-card border-border text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              }`}
+            >
+              <span>{tab.label}</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  isActive
+                    ? "bg-background/20 text-background"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {tab.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Liste */}
+      {loading ? (
         <div className="space-y-3">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-24 bg-card rounded-2xl animate-pulse border border-border" />
+          ))}
+        </div>
+      ) : groups.length === 0 ? (
+        <div className="rounded-2xl border border-border bg-card p-12 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/10 to-violet-500/10 flex items-center justify-center mx-auto mb-4">
+            <ShoppingBag className="w-8 h-8 text-blue-500" />
+          </div>
+          <p className="text-base font-semibold text-foreground mb-1">
+            {searchQuery ? "Aramaya uygun alıcı bulunamadı" : "Henüz sipariş yok"}
+          </p>
+          <p className="text-xs text-muted-foreground mb-5">
+            {searchQuery ? `"${searchQuery}" kelimesini içeren bir sipariş bulunamadı.` : "Yeni bir sipariş oluşturarak başlayın."}
+          </p>
+          {searchQuery ? (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="text-xs text-blue-600 font-semibold hover:underline"
+            >
+              Aramayı Temizle
+            </button>
+          ) : (
+            <button
+              onClick={() => setNewOpen(true)}
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-md shadow-blue-500/20"
+            >
+              Sipariş Oluştur
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2.5">
           {groups.map((g) => {
             const totalDebt = calculateTotalDebt(g.orders);
             const remainingToDeliver = calculateRemainingToDeliver(g.orders);
@@ -352,22 +397,39 @@ export function OrdersClient() {
               <button
                 key={g.buyer_id}
                 onClick={() => router.push(`/dashboard/orders/${g.buyer_id}`)}
-                className="w-full bg-card rounded-2xl border border-border px-5 py-4 flex items-center justify-between hover:bg-muted/40 hover:border-blue-500/30 hover:shadow-md hover:shadow-blue-500/5 active:scale-[0.99] transition-all group cursor-pointer"
+                className="w-full bg-card rounded-2xl border border-border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-muted/30 hover:border-blue-500/40 hover:shadow-md hover:shadow-blue-500/5 transition-all text-left group cursor-pointer"
               >
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
-                    <span className="text-base font-bold text-white">{g.buyer_name.charAt(0).toUpperCase()}</span>
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-base shadow-sm shrink-0">
+                    {g.buyer_name.charAt(0).toUpperCase()}
                   </div>
-                  <div className="text-left">
-                    <p className="text-base font-bold text-foreground">{g.buyer_name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {g.orders.length} sipariş
-                      {remainingToDeliver > 0 && <span className="text-amber-600 ml-2">· {remainingToDeliver} adet teslim edilecek</span>}
-                      {totalDebt > 0 && <span className="text-red-500 ml-2">· {formatCurrency(totalDebt)} borç</span>}
+                  <div className="min-w-0">
+                    <p className="font-bold text-sm sm:text-base text-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors truncate">
+                      {g.buyer_name}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {g.orders.length} aktif sipariş
                     </p>
                   </div>
                 </div>
-                <ChevronRight className="w-5 h-5 text-muted-foreground/40 group-hover:text-muted-foreground transition-colors shrink-0" />
+
+                <div className="flex items-center gap-2 self-start sm:self-center shrink-0 flex-wrap">
+                  {remainingToDeliver > 0 && (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                      {remainingToDeliver} adet teslimat bekliyor
+                    </span>
+                  )}
+                  {totalDebt > 0 ? (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
+                      {formatCurrency(totalDebt)} borç
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                      Borçsuz
+                    </span>
+                  )}
+                  <ChevronRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-foreground group-hover:translate-x-0.5 transition-all ml-1" />
+                </div>
               </button>
             );
           })}

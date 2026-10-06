@@ -30,6 +30,29 @@ export const COLOR_CODE_MAP: Record<string, string> = {
   Metalik: "MET",
 };
 
+// Koddan Türkçe renk ismine ters harita
+export const CODE_TO_COLOR_MAP: Record<string, string> = Object.entries(COLOR_CODE_MAP).reduce(
+  (acc, [name, code]) => {
+    acc[code] = name;
+    return acc;
+  },
+  {} as Record<string, string>
+);
+
+/**
+ * Stok kodundaki (SKU) segmentlerden rengi çözer (Örn: JJT-CRK-20 -> "Çok Renkli")
+ */
+export function extractColorFromStockCode(stockCode: string): string | null {
+  if (!stockCode) return null;
+  const parts = stockCode.toUpperCase().split("-");
+  for (const part of parts) {
+    if (CODE_TO_COLOR_MAP[part]) {
+      return CODE_TO_COLOR_MAP[part];
+    }
+  }
+  return null;
+}
+
 /**
  * Renk isminden 3 harfli standart renk kodunu türetir (Örn: Siyah -> SIY, Beyaz -> BEY, Ten -> TEN)
  */
@@ -56,14 +79,50 @@ export function getColorCode(colorName: string): string {
 }
 
 /**
- * Ürün boyutu / yüksekliğini tespit eder (Örn: "20 cm" -> "20", "Petra Vazo 16 cm" -> "16")
+ * Metinden (başlık, açıklama vb.) yüksekliği veya aralığı çözer (Örn: "15-16 cm", "15 - 16 cm", "20 cm")
+ */
+export function extractHeightFromText(text?: string): string | null {
+  if (!text) return null;
+
+  // 1. Aralık tespiti (Örn: "15-16 cm", "15 - 16 cm", "15-16", "0 - 10 cm", "11 - 30 cm")
+  const rangeMatch = text.match(/(\d+)\s*[-–/]\s*(\d+)(?:\s*(?:cm|CM))?/i);
+  if (rangeMatch) {
+    const r1 = rangeMatch[1];
+    const r2 = rangeMatch[2];
+    if (r1 === "15" && r2 === "16") return "15-16 cm";
+    if (r1 === "0" && r2 === "10") return "0 - 10 cm";
+    if (r1 === "11" && r2 === "30") return "11 - 30 cm";
+    if (r1 === "31" && r2 === "45") return "31 - 45 cm";
+    if (r1 === "41" && r2 === "50") return "41 - 50 cm";
+    if (r1 === "51" && r2 === "80") return "51 - 80 cm";
+    if (r1 === "71" && r2 === "90") return "71 - 90 cm";
+    if (r1 === "91" && r2 === "110") return "91 - 110 cm";
+    if (r1 === "111" && r2 === "150") return "111 - 150 cm";
+    return `${r1}-${r2} cm`;
+  }
+
+  // 2. Tek sayı cm tespiti (Örn: "20 cm", "15CM", "10 cm")
+  const singleMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:cm|CM)/i);
+  if (singleMatch) {
+    return `${singleMatch[1]} cm`;
+  }
+
+  return null;
+}
+
+/**
+ * Ürün boyutu / yüksekliğini tespit eder (Örn: "20 cm" -> "20", "15-16 cm" -> "15", "Petra Vazo 16 cm" -> "16")
  */
 export function extractSizeCode(heightStr?: string, title?: string): string {
   if (heightStr) {
+    const range = heightStr.match(/(\d+)\s*[-–/]\s*(\d+)/);
+    if (range) return range[1];
     const match = heightStr.match(/\d+/);
     if (match) return match[0];
   }
   if (title) {
+    const range = title.match(/(\d+)\s*[-–/]\s*(\d+)/);
+    if (range) return range[1];
     const match = title.match(/(\d+)\s*(?:cm|CM|mm|MM)/i);
     if (match) return match[1];
     const anyNum = title.match(/\b\d+\b/);

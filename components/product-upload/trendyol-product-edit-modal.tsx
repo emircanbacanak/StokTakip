@@ -51,11 +51,16 @@ import { sanitizeTrendyolDescription } from "@/lib/trendyol-api-client";
 import {
   generateSmartStockCode,
   generateEan13Barcode,
+  extractColorFromStockCode,
+  extractHeightFromText,
 } from "@/lib/product-code-generator";
+import { detectCategoryFromProduct } from "@/lib/trendyol-categories-static";
 import { TrendyolProductCreateFlow } from "./trendyol-product-create-flow";
+import { naturalSort } from "@/lib/utils";
 
-// Trendyol Resmi Seçim Değerleri
-export const TRENDYOL_CATEGORIES = [
+// Trendyol Resmi Seçim Değerleri (Doğal ve alfabetik sıralı)
+export const TRENDYOL_CATEGORIES = naturalSort([
+  "Figür",
   "Vazo",
   "Saksı",
   "Dekoratif Obje",
@@ -64,9 +69,9 @@ export const TRENDYOL_CATEGORIES = [
   "Biblo ve Heykel",
   "Ev Tekstili",
   "Mutfak Gereçleri",
-];
+]);
 
-export const TRENDYOL_BRANDS = [
+export const TRENDYOL_BRANDS = naturalSort([
   "ahenk tasarım",
   "Ahenk Tasarımlar",
   "Paşabahçe",
@@ -76,9 +81,9 @@ export const TRENDYOL_BRANDS = [
   "Bella Maison",
   "Porland",
   "Trendyol",
-];
+]);
 
-export const TRENDYOL_MATERIALS = [
+export const TRENDYOL_MATERIALS = naturalSort([
   "Cam",
   "Alçı",
   "Sedef",
@@ -97,25 +102,29 @@ export const TRENDYOL_MATERIALS = [
   "Poliresin",
   "Polyester",
   "Belirtilmemiş",
-];
+]);
 
-export const TRENDYOL_HEIGHTS = [
-  "14 cm",
-  "20 cm",
-  "19 cm",
-  "71 - 90",
-  "41 - 50",
-  "15-16 cm",
-  "91 - 110",
+export const TRENDYOL_HEIGHTS = naturalSort([
   "0 - 10 cm",
-  "111 - 150",
-  "51 - 80 cm",
+  "1 cm", "2 cm", "3 cm", "4 cm", "5 cm", "6 cm", "7 cm", "8 cm", "9 cm", "10 cm",
+  "11 cm", "12 cm", "13 cm", "14 cm", "15 cm", "16 cm", "17 cm", "18 cm", "19 cm", "20 cm",
+  "21 cm", "22 cm", "23 cm", "24 cm", "25 cm", "26 cm", "27 cm", "28 cm", "29 cm", "30 cm",
+  "31 cm", "32 cm", "33 cm", "34 cm", "35 cm", "36 cm", "37 cm", "38 cm", "39 cm", "40 cm",
+  "42 cm", "45 cm", "48 cm", "50 cm", "55 cm", "60 cm", "65 cm", "70 cm", "75 cm", "80 cm",
+  "85 cm", "90 cm", "95 cm", "100 cm", "110 cm", "120 cm", "130 cm", "140 cm", "150 cm",
   "11 - 30 cm",
+  "15-16 cm",
   "31 - 45 cm",
+  "41 - 50 cm",
+  "51 - 80 cm",
+  "71 - 90 cm",
+  "91 - 110 cm",
+  "111 - 150 cm",
+  "150 cm ve üzeri",
   "Belirtilmemiş",
-];
+]);
 
-export const TRENDYOL_PIECE_COUNTS = [
+export const TRENDYOL_PIECE_COUNTS = naturalSort([
   "1",
   "2",
   "3",
@@ -124,9 +133,9 @@ export const TRENDYOL_PIECE_COUNTS = [
   "5+",
   "1 Parça",
   "Belirtilmemiş",
-];
+]);
 
-export const TRENDYOL_WEB_COLORS = [
+export const TRENDYOL_WEB_COLORS = naturalSort([
   "Mor",
   "Gri",
   "Bej",
@@ -153,9 +162,10 @@ export const TRENDYOL_WEB_COLORS = [
   "Kahverengi",
   "Parmak İzi Bırakmaz Inox",
   "Parmak İzi Bırakmaz Koyu Inox",
-];
+]);
 
-export const TRENDYOL_COLORS = [
+export const TRENDYOL_COLORS = naturalSort([
+  "Çok Renkli",
   "Ekru",
   "Beyaz",
   "Siyah",
@@ -176,9 +186,9 @@ export const TRENDYOL_COLORS = [
   "Bronz",
   "Altın / Gold",
   "Gümüş / Silver",
-];
+]);
 
-export const TRENDYOL_ORIGINS = [
+export const TRENDYOL_ORIGINS = naturalSort([
   "TR - (Türkiye)",
   "CN - (Çin)",
   "DE - (Almanya)",
@@ -195,9 +205,9 @@ export const TRENDYOL_ORIGINS = [
   "AZ - (Azerbaycan)",
   "AE - (Birleşik Arap Emirlikleri)",
   "SA - (Suudi Arabistan)",
-];
+]);
 
-export const TRENDYOL_CARGO_COMPANIES = [
+export const TRENDYOL_CARGO_COMPANIES = naturalSort([
   "PTT Kargo",
   "Aras Kargo",
   "Sürat Kargo",
@@ -207,13 +217,13 @@ export const TRENDYOL_CARGO_COMPANIES = [
   "DHL eCommerce",
   "CEVA Lojistik",
   "Horoz Lojistik",
-];
+]);
 
-export const TRENDYOL_PERSONAS = [
+export const TRENDYOL_PERSONAS = naturalSort([
   "Minimal comfort",
   "Urban Pop",
   "Classic Heritage",
-];
+]);
 
 interface TrendyolProductEditModalProps {
   listing: TrendyolListing;
@@ -262,9 +272,13 @@ export function TrendyolProductEditModal({
     };
   }, [modelCode]);
   const [barcode, setBarcode] = useState(listing.barcode || "");
-  const [categoryName, setCategoryName] = useState("Vazo");
-  const [categoryId, setCategoryId] = useState<number | null>(1881);
-  const [categoryQuery, setCategoryQuery] = useState("Vazo");
+  const initialCategory = detectCategoryFromProduct({
+    category_id: listing.category_id,
+    title: listing.title,
+  });
+  const [categoryName, setCategoryName] = useState(initialCategory.name);
+  const [categoryId, setCategoryId] = useState<number | null>(initialCategory.id);
+  const [categoryQuery, setCategoryQuery] = useState(initialCategory.name);
   const [categoryResults, setCategoryResults] = useState<{ id: number; name: string; path?: string }[]>([]);
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [categoryLoading, setCategoryLoading] = useState(false);
@@ -317,27 +331,23 @@ export function TrendyolProductEditModal({
   const [description, setDescription] = useState(() => {
     const raw = listing.description || "";
     if (raw && raw !== "-") return sanitizeTrendyolDescription(raw);
-    return `<p><strong>Ahenk Tasarım'ın Aura serisi ile evinize veya ofisinize modern ve estetik bir dokunuş katın!</strong></p>
-  <p>Aura Vazo, sade ama iddialı duruşuyla iç mekân dekorasyonunda fark yaratmak isteyenler için tasarlandı. Çeşitli rengiyle sıcak ve zarif bir hava katan bu dekoratif obje, hem modern hem de klasik tarzdaki ortamlarla kusursuz uyum sağlar.</p>
-  
-  <p><strong>✨ Neden Aura Vazo?</strong><br/>
-  Estetik hatları ve göz alıcı tonuyla Aura Vazo, bulunduğu her ortama şıklık ve karakter katar. Salon, oturma odası, yemek masası, çalışma masası, ofis masası, TV ünitesi, kitaplık, konsol veya vitrin üzerine yerleştirebileceğiniz bu dekoratif vazo, kuru çiçek, yapay çiçek, otantik dallar veya sadece boş haliyle sade bir dekor objesi olarak kullanılabilir.</p>
-
+    const itemTitle = listing.title || "Özel Tasarım Dekoratif Obje";
+    const isFigur =
+      itemTitle.toLowerCase().includes("figür") ||
+      itemTitle.toLowerCase().includes("figur") ||
+      itemTitle.toLowerCase().includes("biblo") ||
+      itemTitle.toLowerCase().includes("anime");
+    const itemType = isFigur ? "Dekoratif Karakter Figürü / Biblo" : "Dekoratif Obje";
+    return `<p><strong>${itemTitle}</strong></p>
+  <p>Ahenk Tasarım güvencesiyle yüksek kaliteli malzemeden üretilen bu ${itemType}, ev ve ofis ortamlarınıza modern ve estetik bir hava katar. Masaüstü, kitaplık, vitrin ve konsol sergilemeleri için kusursuz bir tercihtir.</p>
   <p><strong>📦 Kullanım Alanları:</strong><br/>
-  Ev dekorasyonu, ofis dekorasyonu, salon süs eşyası, masa üstü dekor, hediyelik eşya, yeni ev hediyesi, iş yeri açılış hediyesi, doğum günü hediyesi, sevgiliye hediye, anneler günü hediyesi, minimalist dekor tutkunları, modern iç mimari projeleri, kafe ve restoran masa dekoru, vitrin süslemesi için idealdir.</p>
-
+  Ev ve ofis dekorasyonu, masaüstü süs objesi, vitrin ve kitaplık dekoru, hediyelik eşya.</p>
   <p><strong>🎨 Tasarım Detayları:</strong></p>
   <ul>
-    <li><strong>Model:</strong> Aura</li>
-    <li><strong>Ürün Tipi:</strong> Dekoratif Vazo (Tek Adet)</li>
+    <li><strong>Ürün Tipi:</strong> ${itemType}</li>
     <li><strong>Malzeme:</strong> Dayanıklı Plastik</li>
-    <li><strong>Yükseklik:</strong> 20 cm</li>
-    <li><strong>Parça Sayısı:</strong> 1 Parça</li>
     <li><strong>Üretim Yeri:</strong> Türkiye</li>
-  </ul>
-
-  <p><strong>💡 Neden Tercih Etmelisiniz?</strong><br/>
-  Hafif yapısı sayesinde kolayca taşınabilir ve istediğiniz her noktaya rahatlıkla konumlandırılabilir. Göz alıcı rengi, hem sıcak hem de nötr iç mekân dekorasyonlarıyla uyum sağlayarak her ortama sofistike bir hava katar. Modern, minimal, İskandinav, bohem veya endüstriyel tarzdaki dekorasyonlara kolayca entegre olabilecek zamansız bir tasarıma sahiptir.</p>`;
+  </ul>`;
   });
   const [showHtml, setShowHtml] = useState(false);
   const contentEditableRef = useRef<HTMLDivElement>(null);
@@ -366,12 +376,26 @@ export function TrendyolProductEditModal({
   const [giftWrap, setGiftWrap] = useState("none");
   const [customizable, setCustomizable] = useState("no");
 
-  // Ürün Özellikleri (Trendyol Seçenekli Değerler)
+  // Ürün Özellikleri (Trendyol Seçenekli Değerler - Akıllı Başlangıç)
+  const initialColor =
+    extractColorFromStockCode(listing.stock_code) ||
+    (listing.title?.toLowerCase().includes("çok renkli") ? "Çok Renkli" : null) ||
+    (listing.title?.toLowerCase().includes("siyah") ? "Siyah" : null) ||
+    (listing.title?.toLowerCase().includes("beyaz") ? "Beyaz" : null) ||
+    "Çok Renkli";
+
+  const initialHeight =
+    extractHeightFromText(listing.title) ||
+    (listing.stock_code?.endsWith("25") || listing.stock_code?.includes("-25") ? "25 cm" : null) ||
+    (listing.stock_code?.endsWith("20") || listing.stock_code?.includes("-20") ? "20 cm" : null) ||
+    (listing.stock_code?.endsWith("15") || listing.stock_code?.includes("-15") ? "15 cm" : null) ||
+    "20 cm";
+
   const [material, setMaterial] = useState("Plastik");
-  const [height, setHeight] = useState("20 cm");
+  const [height, setHeight] = useState(initialHeight);
   const [pieceCount, setPieceCount] = useState("1");
-  const [webColor, setWebColor] = useState("Ekru");
-  const [color, setColor] = useState("Ekru");
+  const [webColor, setWebColor] = useState(initialColor);
+  const [color, setColor] = useState(initialColor);
   const [origin, setOrigin] = useState("TR - (Türkiye)");
   const [persona, setPersona] = useState("");
 
@@ -410,6 +434,8 @@ export function TrendyolProductEditModal({
     pieceCount: string;
     height: string;
     origin: string;
+    webColor: string;
+    color: string;
   } | null>(null);
 
   if (!initialFormValuesRef.current) {
@@ -426,8 +452,10 @@ export function TrendyolProductEditModal({
       cargoCompany: listing.cargo_company || "",
       material: "Plastik",
       pieceCount: "1",
-      height: "20 cm",
+      height: initialHeight,
       origin: "TR - (Türkiye)",
+      webColor: initialColor,
+      color: initialColor,
     };
   }
 
@@ -554,6 +582,22 @@ export function TrendyolProductEditModal({
         newValue: origin,
       });
     }
+    if (webColor !== init.webColor) {
+      changes.push({
+        key: "web_color",
+        label: `Web Color (${webColor})`,
+        oldValue: init.webColor,
+        newValue: webColor,
+      });
+    }
+    if (color !== init.color) {
+      changes.push({
+        key: "color",
+        label: `Renk (${color})`,
+        oldValue: init.color,
+        newValue: color,
+      });
+    }
 
     return changes;
   };
@@ -655,7 +699,7 @@ export function TrendyolProductEditModal({
         const getAttrValues = (attrId: number, fallback: string[]) => {
           const found = attrs.find((a) => a.attribute.id === attrId);
           if (found && found.attributeValues && found.attributeValues.length > 0) {
-            return found.attributeValues.map((v) => v.name);
+            return naturalSort(found.attributeValues.map((v) => v.name));
           }
           return fallback;
         };
@@ -701,12 +745,13 @@ export function TrendyolProductEditModal({
         if (p.stockCode) {
           setStockCode(p.stockCode);
         }
-        if (p.categoryName) {
-          setCategoryName(p.categoryName);
-          setCategoryQuery(p.categoryName);
-        }
-        if (p.categoryId) {
-          setCategoryId(p.categoryId);
+        const detectedCat = p.category ? { id: p.category.id, name: p.category.name } : detectCategoryFromProduct(p);
+        const finalCatName = p.categoryName || detectedCat.name;
+        const finalCatId = p.categoryId || detectedCat.id;
+        if (finalCatName) {
+          setCategoryName(finalCatName);
+          setCategoryQuery(finalCatName);
+          setCategoryId(finalCatId);
         }
 
         if (p.dimensionalWeight) setDesi(String(p.dimensionalWeight));
@@ -721,8 +766,10 @@ export function TrendyolProductEditModal({
 
         let liveMaterial = "Plastik";
         let livePieceCount = "1";
-        let liveHeight = "20 cm";
+        let liveHeight = initialHeight;
         let liveOrigin = "TR - (Türkiye)";
+        let liveWebColor = initialColor;
+        let liveColor = initialColor;
 
         if (Array.isArray(p.attributes)) {
           for (const attr of p.attributes) {
@@ -738,8 +785,14 @@ export function TrendyolProductEditModal({
               setHeight(attr.attributeValue);
               liveHeight = attr.attributeValue;
             }
-            if (attr.attributeId === 348 && attr.attributeValue) setWebColor(attr.attributeValue);
-            if (attr.attributeId === 47 && attr.attributeValue) setColor(attr.attributeValue);
+            if (attr.attributeId === 348 && attr.attributeValue) {
+              setWebColor(attr.attributeValue);
+              liveWebColor = attr.attributeValue;
+            }
+            if (attr.attributeId === 47 && attr.attributeValue) {
+              setColor(attr.attributeValue);
+              liveColor = attr.attributeValue;
+            }
             if (attr.attributeId === 1192 && attr.attributeValue) {
               const orig = attr.attributeValue === "TR" ? "TR - (Türkiye)" : attr.attributeValue;
               setOrigin(orig);
@@ -760,6 +813,8 @@ export function TrendyolProductEditModal({
             pieceCount: livePieceCount,
             height: liveHeight,
             origin: liveOrigin,
+            webColor: liveWebColor,
+            color: liveColor,
           };
         }
       } catch (e) {
@@ -998,7 +1053,7 @@ export function TrendyolProductEditModal({
     });
 
     try {
-      const geminiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || "AIzaSyBIk49ahTcfrHtajtYxHYBlpM5LMC2zruE";
+      const geminiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || "";
       const promptText = `Sen profesyonel bir Trendyol e-ticaret uzmanısın. Aşağıdaki ürün için zengin HTML formatında, göz alıcı, maddeli, emoji ve başlıklar içeren profesyonel bir Trendyol ürün açıklaması yaz:
       Ürün Adı: ${title}
       Kategori: ${categoryName}
@@ -1456,8 +1511,8 @@ export function TrendyolProductEditModal({
             title: `${title} (${copyColorName})`,
             brand_id: 1066155,
             brand_name: brandName,
-            category_id: 1881,
-            trendyol_category_id: 1881,
+            category_id: detectCategoryFromProduct({ category_id: categoryId, categoryName, title }).id,
+            trendyol_category_id: detectCategoryFromProduct({ category_id: categoryId, categoryName, title }).id,
             description: description.replace(/Toptan sipari[şs] vermeyin\.?\s*/gi, "").trim(),
             desi: Number(desi) || 2,
             vat_rate: Number(vatRate) || 20,

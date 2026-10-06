@@ -6,8 +6,8 @@ const GIB_REFERRER = "https://earsivportal.efatura.gov.tr/intragiris.html";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const username = (body.username || process.env.GIB_USERNAME || "12911762").trim();
-    const password = (body.password || process.env.GIB_PASSWORD || "973973").trim();
+    const username = (body.username || process.env.GIB_USERNAME || "").trim();
+    const password = (body.password || process.env.GIB_PASSWORD || "").trim();
 
     if (!username || !password) {
       return NextResponse.json({ error: "GİB Kullanıcı kodu ve şifre gereklidir." }, { status: 400 });

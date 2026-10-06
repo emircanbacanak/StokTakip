@@ -26,7 +26,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="tr" suppressHydrationWarning>
-      <body className={inter.variable + " font-sans"}>
+      <body className={inter.variable + " font-sans"} suppressHydrationWarning>
         <ThemeProvider>
           {children}
           <Toaster />

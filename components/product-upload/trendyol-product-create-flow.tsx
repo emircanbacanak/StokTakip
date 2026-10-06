@@ -31,13 +31,20 @@ import {
   Camera,
   ChevronDown,
   HelpCircle,
+  ArrowLeft,
+  ArrowRight,
+  Star,
+  Copy,
+  Link as LinkIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useConfirm } from "@/hooks/use-confirm";
+import { createClient } from "@/lib/supabase/client";
 import {
   TRENDYOL_WEB_COLORS,
   TRENDYOL_MATERIALS,
@@ -54,6 +61,8 @@ import {
   generateEan13Barcode,
 } from "@/lib/product-code-generator";
 import { sanitizeTrendyolDescription } from "@/lib/trendyol-api-client";
+import { detectCategoryFromProduct } from "@/lib/trendyol-categories-static";
+import { compressImagesParallel } from "@/lib/image-compressor";
 
 // ─── RENK KODU RENK DAİRESİ EŞLEŞTİRMESİ ──────────────────────────────────────
 const COLOR_HEX_MAP: Record<string, string> = {
@@ -92,13 +101,26 @@ function generateDefaultModelCode(title: string): string {
   return generateSmartModelCode(title);
 }
 
+// ─── BOYUT HESAPLAYICI (10cm altı: Mini, 10-20cm: Midi, 20cm+: Büyük Boy) ───
+export function determineSizeFromHeight(heightStr: string): string {
+  if (!heightStr) return "";
+  const match = heightStr.match(/\d+(\.\d+)?/);
+  if (!match) return "";
+  const num = parseFloat(match[0]);
+  if (num < 10) return "Mini";
+  if (num <= 20) return "Midi";
+  return "Büyük Boy";
+}
+
 // ─── TİPLER ──────────────────────────────────────────────────────────────────
 export interface TableVariantRow {
   id: string;
   checked: boolean;
+  title?: string; // Özelleştirilmiş ürün adı
   color: string;
   customColorName: string;
   height: string;
+  size?: string; // "Mini" | "Midi" | "Büyük Boy"
   images: string[];
   barcode: string;
   salePrice: string;
@@ -145,6 +167,9 @@ export function TrendyolProductCreateFlow({
   const [categorySuggestions, setCategorySuggestions] = useState<Array<{ id: number; name: string }>>([]);
   const [isSearchingCategory, setIsSearchingCategory] = useState(false);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  const [categoryAttributes, setCategoryAttributes] = useState<any[]>([]);
+  const [isLoadingAttributes, setIsLoadingAttributes] = useState(false);
+  const [hasCategorySlicers, setHasCategorySlicers] = useState<boolean>(true);
   const categoryContainerRef = useRef<HTMLDivElement>(null);
   const isCategoryFocusedRef = useRef(false);
 
@@ -182,22 +207,166 @@ export function TrendyolProductCreateFlow({
   const [selectedHeight, setSelectedHeight] = useState<string>(initialData?.height || "");
   const [inputColorScale, setInputColorScale] = useState<string>("");
   const [inputColorName, setInputColorName] = useState<string>("");
-  const [colorChips, setColorChips] = useState<Array<{ id: string; webColor: string; customName: string }>>([]);
+  const [colorChips, setColorChips] = useState<Array<{ id: string; webColor: string; customName: string; height?: string }>>([]);
 
   // Toplu Güncelleme Çubuğu State
   const [bulkPrice, setBulkPrice] = useState<string>("");
   const [bulkVat, setBulkVat] = useState<string>("%20");
   const [bulkStock, setBulkStock] = useState<string>("");
+  const [bulkHeight, setBulkHeight] = useState<string>("");
 
   // Tablo Satırları (Varyant Listesi)
   const [tableVariants, setTableVariants] = useState<TableVariantRow[]>([]);
 
-  // Görsel Yükleme Modalı / State
+  // Çoklu Görsel Yükleme & Yönetim Modalı / State
   const [activeImageUploadRowId, setActiveImageUploadRowId] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isImageManagerOpen, setIsImageManagerOpen] = useState(false);
+  const [isUploadingImages, setIsUploadingImages] = useState(false);
+  const [inputImageUrl, setInputImageUrl] = useState("");
+  const multiFileInputRef = useRef<HTMLInputElement>(null);
 
   // Gönderim Durumu
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // ─── INITIALDATA (MakerWorld veya Ürün Kataloğundan Aktarım) ──────────────
+  const [importedSource, setImportedSource] = useState<string | null>(initialData?.source || null);
+
+  useEffect(() => {
+    if (!initialData) return;
+
+    if (initialData.title) setTitle(initialData.title);
+    if (initialData.modelCode) setModelCode(initialData.modelCode);
+    if (initialData.description) {
+      setDescription(initialData.description);
+      setHtmlContent(initialData.description);
+      if (editorRef.current) {
+        editorRef.current.innerHTML = initialData.description;
+      }
+    }
+    if (initialData.material) setMaterial(initialData.material);
+    if (initialData.pieceCount) setPieceCount(initialData.pieceCount);
+    if (initialData.height) {
+      setHeight(initialData.height);
+      setSelectedHeight(initialData.height);
+    }
+    if (initialData.price) {
+      setBulkPrice(initialData.price.toString());
+    }
+    if (initialData.stock) {
+      setBulkStock(initialData.stock.toString());
+    }
+    if (initialData.source) {
+      setImportedSource(initialData.source);
+    }
+
+    // Kategori tespiti
+    const detected = detectCategoryFromProduct({
+      title: initialData.title,
+      categoryName: initialData.categoryName || initialData.category_name,
+      category_id: initialData.categoryId || initialData.category_id,
+    });
+    if (detected) {
+      setSelectedCategory(detected);
+      setCategorySearchQuery(detected.name);
+    }
+
+    // Marka ("Genel Markalar" varsayılanı)
+    if (initialData.brandId) {
+      setSelectedBrand({ id: initialData.brandId, name: initialData.brandName || "Genel Markalar" });
+      setBrandType("custom");
+    } else {
+      setSelectedBrand({ id: 1066155, name: "Genel Markalar" });
+      setBrandType("nobrand");
+    }
+
+    // Görseller
+    const rawImages = initialData.images || initialData.image_urls || (initialData.image_url ? [initialData.image_url] : []) || [];
+    const validImages = Array.isArray(rawImages) ? rawImages.filter(Boolean) : [];
+
+    // Varyant Satırları Oluşturma
+    const sizes = Array.isArray(initialData.sizes) && initialData.sizes.length > 0 ? initialData.sizes : null;
+
+    if (sizes && sizes.length > 0) {
+      const generatedChips: Array<{ id: string; webColor: string; customName: string; height?: string }> = [];
+      const generatedRows: TableVariantRow[] = [];
+
+      sizes.forEach((s: any, idx: number) => {
+        const sizeName = typeof s === "string" ? s : s.name || s.size_name || "";
+        const rowId = `v-init-${Date.now()}-${idx}`;
+        const smartBarcode = generateEan13Barcode();
+        const smartStockCode = generateSmartStockCode(
+          initialData.modelCode || initialData.title || "MOD",
+          "Beyaz",
+          sizeName,
+          initialData.title || ""
+        );
+
+        generatedChips.push({
+          id: rowId,
+          webColor: "Beyaz",
+          customName: "Beyaz",
+          height: sizeName,
+        });
+
+        generatedRows.push({
+          id: rowId,
+          checked: false,
+          color: "Beyaz",
+          customColorName: "Beyaz",
+          height: sizeName,
+          size: determineSizeFromHeight(sizeName),
+          images: validImages,
+          barcode: smartBarcode,
+          salePrice: initialData.price ? initialData.price.toString() : "",
+          stock: initialData.stock ? initialData.stock.toString() : "10",
+          vatRate: "20",
+          otv: "",
+          stockCode: smartStockCode,
+          lotInfo: "",
+        });
+      });
+
+      setColorChips(generatedChips);
+      setTableVariants(generatedRows);
+    } else if (validImages.length > 0 || initialData.title) {
+      const rowId = `v-init-${Date.now()}-0`;
+      const smartBarcode = generateEan13Barcode();
+      const smartStockCode = generateSmartStockCode(
+        initialData.modelCode || initialData.title || "MOD",
+        "Beyaz",
+        initialData.height || "",
+        initialData.title || ""
+      );
+
+      setColorChips([
+        {
+          id: rowId,
+          webColor: "Beyaz",
+          customName: "Beyaz",
+          height: initialData.height || "",
+        },
+      ]);
+
+      setTableVariants([
+        {
+          id: rowId,
+          checked: false,
+          color: "Beyaz",
+          customColorName: "Beyaz",
+          height: initialData.height || "",
+          size: determineSizeFromHeight(initialData.height || ""),
+          images: validImages,
+          barcode: smartBarcode,
+          salePrice: initialData.price ? initialData.price.toString() : "",
+          stock: initialData.stock ? initialData.stock.toString() : "10",
+          vatRate: "20",
+          otv: "",
+          stockCode: smartStockCode,
+          lotInfo: "",
+        },
+      ]);
+    }
+  }, [initialData]);
 
   // ─── MODEL KODU OTOMATİK DOLDURMA ─────────────────────────────────────────
   useEffect(() => {
@@ -211,6 +380,25 @@ export function TrendyolProductCreateFlow({
           return { ...r, stockCode: sCode };
         })
       );
+    }
+  }, [title]);
+
+  // ─── KATEGORİ OTOMATİK TESPİTİ (Title veya Arama teriminden) ──────────────
+  useEffect(() => {
+    if (!selectedCategory && title.trim().length > 2) {
+      const titleLower = title.toLowerCase();
+      if (
+        titleLower.includes("figür") ||
+        titleLower.includes("figur") ||
+        titleLower.includes("biblo") ||
+        titleLower.includes("anime") ||
+        titleLower.includes("karakter") ||
+        titleLower.includes("heykel") ||
+        titleLower.includes("gojo")
+      ) {
+        setSelectedCategory({ id: 833, name: "Figür" });
+        setCategorySearchQuery("Figür");
+      }
     }
   }, [title]);
 
@@ -263,7 +451,7 @@ export function TrendyolProductCreateFlow({
           };
 
           flatten(data.categories || []);
-          const suggestions = flatList.slice(0, 15);
+          const suggestions = flatList.slice(0, 20);
           setCategorySuggestions(suggestions);
           // Sadece kullanıcı alana odaklandıysa ve kategori seçili değilse aç
           if (suggestions.length > 0 && isCategoryFocusedRef.current && !selectedCategory) {
@@ -279,6 +467,55 @@ export function TrendyolProductCreateFlow({
 
     return () => clearTimeout(timer);
   }, [categorySearchQuery, selectedCategory?.id]);
+
+  // Dropdown dışına tıklandığında menüleri kapat
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (categoryContainerRef.current && !categoryContainerRef.current.contains(event.target as Node)) {
+        setShowCategoryDropdown(false);
+        isCategoryFocusedRef.current = false;
+      }
+      if (brandContainerRef.current && !brandContainerRef.current.contains(event.target as Node)) {
+        setShowBrandDropdown(false);
+        isBrandFocusedRef.current = false;
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  // ─── KATEGORİ ÖZELLİKLERİ VE VARYANT/SLICER BİLGİSİNİ ÇEK ─────────────────
+  useEffect(() => {
+    if (!selectedCategory?.id) {
+      setCategoryAttributes([]);
+      setHasCategorySlicers(true);
+      return;
+    }
+
+    const fetchAttrs = async () => {
+      setIsLoadingAttributes(true);
+      try {
+        const res = await fetch(`/api/trendyol-meta?type=attributes&categoryId=${selectedCategory.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          const attrs = data.categoryAttributes || [];
+          setCategoryAttributes(attrs);
+
+          // Trendyol'da bu kategoride slicer / varyant var mı kontrol et
+          const slicerAttrs = attrs.filter((a: any) => a.slicer || a.varianter);
+          setHasCategorySlicers(slicerAttrs.length > 0);
+        }
+      } catch (err) {
+        console.error("Kategori özellikleri alınamadı:", err);
+      } finally {
+        setIsLoadingAttributes(false);
+      }
+    };
+
+    fetchAttrs();
+  }, [selectedCategory?.id]);
 
   // ─── MARKA CANLI ARAMA (API: /api/trendyol-meta?type=brands&name=...) ────────
   useEffect(() => {
@@ -419,58 +656,160 @@ export function TrendyolProductCreateFlow({
 
   // ─── VARYANT TABLOSU İŞLEMLERİ (TRENDYOL BİREBİR) ──────────────────────────
 
-  // Renk Ekle
+  // ─── VARYANT TABLOSU İŞLEMLERİ (TRENDYOL BİREBİR) ──────────────────────────
+
+  // Varyant (Renk + Yükseklik) Ekle
   const handleAddColor = () => {
     const color = inputColorScale;
     const custom = inputColorName.trim() || color;
+    const currentVariantHeight = selectedHeight || height || "";
 
-    // Aynı renk zaten var mı?
-    if (colorChips.some((c) => c.webColor === color)) {
-      toast({ title: "Uyarı", description: `${color} rengi zaten ekli.`, variant: "destructive" });
+    // Aynı renk ve aynı yükseklik kombinasyonu var mı kontrol et
+    const isDuplicate = tableVariants.some(
+      (v) => v.color === color && (v.height || "") === currentVariantHeight
+    );
+
+    if (isDuplicate) {
+      toast({
+        title: "Varyant Zaten Ekli",
+        description: `${color}${currentVariantHeight ? ` (${currentVariantHeight})` : ""} varyantı tabloda zaten mevcut.`,
+        variant: "destructive",
+      });
       return;
     }
 
-    const newChip = { id: `c-${Date.now()}`, webColor: color, customName: custom };
-    setColorChips([...colorChips, newChip]);
-
-    // Tabloya yeni satır ekle (Örn: PTR-TEN-20 ve 999000... barkod)
-    const smartStockCode = generateSmartStockCode(modelCode || title, color, selectedHeight, title);
+    const rowId = `v-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const newChip = {
+      id: rowId,
+      webColor: color,
+      customName: custom,
+      height: currentVariantHeight,
+    };
+    
     const smartBarcode = generateEan13Barcode();
+    const smartStockCode = generateSmartStockCode(modelCode || title, color, currentVariantHeight, title);
+    const initialImages = initialData?.image_urls || initialData?.images || [];
+    const sourceImages = Array.isArray(initialImages) && initialImages.length > 0 ? [...initialImages] : [];
 
     const newRow: TableVariantRow = {
-      id: `v-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      id: rowId,
       checked: false,
-      color: color,
+      title: "",
+      color,
       customColorName: custom,
-      height: selectedHeight || "",
-      images: [],
+      height: currentVariantHeight,
+      size: determineSizeFromHeight(currentVariantHeight),
+      images: sourceImages,
       barcode: smartBarcode,
-      salePrice: bulkPrice && bulkPrice !== "0,00" ? bulkPrice : "",
-      stock: bulkStock && bulkStock !== "0" ? bulkStock : "",
-      vatRate: bulkVat || "20",
+      salePrice: "",
+      stock: "",
+      vatRate: "20",
       otv: "",
       stockCode: smartStockCode,
       lotInfo: "",
     };
 
-    setTableVariants((prev) => [...prev, newRow]);
+    const isSingleEmptyPlaceholder =
+      tableVariants.length === 1 &&
+      tableVariants[0].id.startsWith("v-init-") &&
+      !tableVariants[0].salePrice;
+
+    if (isSingleEmptyPlaceholder) {
+      setColorChips([newChip]);
+      setTableVariants([newRow]);
+    } else {
+      setColorChips((prev) => [...prev, newChip]);
+      setTableVariants((prev) => [...prev, newRow]);
+    }
+
     setInputColorName("");
-    toast({ title: "Renk Eklendi", description: `${color} varyant tablosuna eklendi.` });
+    toast({
+      title: "Varyant Eklendi",
+      description: `${color}${currentVariantHeight ? ` (${currentVariantHeight})` : ""} varyant tablosuna eklendi.`,
+    });
   };
 
-  // Renk Çipini ve Tablodaki Satırını Kaldır
-  const handleRemoveColorChip = (chipId: string, colorName: string) => {
-    setColorChips(colorChips.filter((c) => c.id !== chipId));
-    setTableVariants(tableVariants.filter((v) => v.color !== colorName));
+  // Yeni Bağımsız Ürün / Kopya Satırı Ekle (Aynı Model Kodu Altında)
+  const handleAddNewCloneRow = (sourceRow?: TableVariantRow) => {
+    const defaultColor = sourceRow?.color || inputColorScale || "Beyaz";
+    const defaultHeight = sourceRow?.height || selectedHeight || height || "";
+    const defaultSize = sourceRow?.size || determineSizeFromHeight(defaultHeight);
+    const rowId = `v-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const smartBarcode = generateEan13Barcode();
+    const smartStockCode = generateSmartStockCode(modelCode || title, defaultColor, defaultHeight, title);
+
+    const initialImages = initialData?.image_urls || initialData?.images || [];
+    const sourceImages =
+      sourceRow?.images && sourceRow.images.length > 0
+        ? [...sourceRow.images]
+        : Array.isArray(initialImages) && initialImages.length > 0
+        ? [...initialImages]
+        : [];
+
+    const newRow: TableVariantRow = {
+      id: rowId,
+      checked: false,
+      title: "", // Kullanıcı kendisi girecek
+      color: defaultColor,
+      customColorName: sourceRow?.customColorName || defaultColor,
+      height: defaultHeight,
+      size: defaultSize,
+      images: sourceImages,
+      barcode: smartBarcode, // Otomatik EAN-13
+      salePrice: "", // Fiyat boş olacak, kullanıcı girecek
+      stock: "", // Stok boş olacak, kullanıcı girecek
+      vatRate: "20", // KDV her zaman %20
+      otv: "",
+      stockCode: smartStockCode, // Otomatik stok kodu
+      lotInfo: "",
+    };
+
+    const isSingleEmptyPlaceholder =
+      tableVariants.length === 1 &&
+      tableVariants[0].id.startsWith("v-init-") &&
+      !tableVariants[0].salePrice;
+
+    if (isSingleEmptyPlaceholder) {
+      setTableVariants([newRow]);
+    } else {
+      setTableVariants((prev) => [...prev, newRow]);
+    }
+    toast({
+      title: "Yeni Ürün / Kopya Eklendi",
+      description: "Yeni satır oluşturuldu. Barkod, stok kodu ve KDV (%20) hazır; başlık, fiyat ve stok girebilirsiniz.",
+    });
+  };
+
+  // Renk / Varyant Çipini ve Tablodaki Satırını Kaldır
+  const handleRemoveColorChip = (chipId: string) => {
+    setColorChips((prev) => prev.filter((c) => c.id !== chipId));
+    setTableVariants((prev) => prev.filter((v) => v.id !== chipId));
   };
 
   // Tablodan Tek Satır Kaldır
   const handleRemoveVariantRow = (rowId: string) => {
-    const row = tableVariants.find((r) => r.id === rowId);
-    if (row) {
-      setColorChips(colorChips.filter((c) => c.webColor !== row.color));
-    }
-    setTableVariants(tableVariants.filter((r) => r.id !== rowId));
+    setColorChips((prev) => prev.filter((c) => c.id !== rowId));
+    setTableVariants((prev) => prev.filter((r) => r.id !== rowId));
+  };
+
+  // Satırda Yükseklik Değiştirildiğinde (Otomatik Boyut Hesaplama: <10cm Mini, 10-20cm Midi, >20cm Büyük Boy)
+  const handleUpdateVariantHeight = (rowId: string, newHeight: string) => {
+    const calculatedSize = determineSizeFromHeight(newHeight);
+    setTableVariants((prev) =>
+      prev.map((r) => {
+        if (r.id !== rowId) return r;
+        const updatedStockCode = generateSmartStockCode(modelCode || title, r.color, newHeight, title);
+        return {
+          ...r,
+          height: newHeight,
+          size: calculatedSize || r.size,
+          stockCode: updatedStockCode,
+        };
+      })
+    );
+    setColorChips((prev) =>
+      prev.map((c) => (c.id === rowId ? { ...c, height: newHeight } : c))
+    );
   };
 
   // Toplu Güncelleme Uygula (Trendyol Güncelle Butonu)
@@ -479,8 +818,15 @@ export function TrendyolProductCreateFlow({
     setTableVariants((prev) =>
       prev.map((row) => {
         if (!hasChecked || row.checked) {
+          const newHeight = bulkHeight ? bulkHeight : row.height;
+          const updatedStockCode = bulkHeight
+            ? generateSmartStockCode(modelCode || title, row.color, newHeight, title)
+            : row.stockCode;
+
           return {
             ...row,
+            height: newHeight,
+            stockCode: updatedStockCode,
             salePrice: bulkPrice && bulkPrice !== "0,00" ? bulkPrice : row.salePrice,
             vatRate: bulkVat ? bulkVat : row.vatRate,
             stock: bulkStock && bulkStock !== "0" ? bulkStock : row.stock,
@@ -489,11 +835,22 @@ export function TrendyolProductCreateFlow({
         return row;
       })
     );
+    if (bulkHeight) {
+      setColorChips((prev) =>
+        prev.map((c) => {
+          const row = tableVariants.find((r) => r.id === c.id);
+          if (!hasChecked || (row && row.checked)) {
+            return { ...c, height: bulkHeight };
+          }
+          return c;
+        })
+      );
+    }
     toast({
       title: "Toplu Güncelleme Yapıldı",
       description: hasChecked
-        ? "Seçili varyantların Fiyat, KDV ve Stok değerleri güncellendi."
-        : "Tüm varyantların Fiyat, KDV ve Stok değerleri güncellendi.",
+        ? "Seçili varyantların bilgileri güncellendi."
+        : "Tüm varyantların bilgileri güncellendi.",
     });
   };
 
@@ -509,46 +866,233 @@ export function TrendyolProductCreateFlow({
     setTableVariants((prev) => prev.map((r) => ({ ...r, checked })));
   };
 
-  // Görsel Yükleme (ImgBB / URL)
-  const handleUploadImageForVariant = async (file: File) => {
+  // ─── ÇOKLU GÖRSEL YÜKLEME VE YÖNETİM METODLARI ──────────────────────────
+  const handleUploadFiles = async (files: FileList | File[]) => {
     if (!activeImageUploadRowId) return;
-    const apiKey = process.env.NEXT_PUBLIC_IMGBB_API_KEY || "";
-    if (!apiKey) {
+    const currentVariant = tableVariants.find((r) => r.id === activeImageUploadRowId);
+    if (!currentVariant) return;
+
+    if (currentVariant.images.length >= 8) {
       toast({
-        title: "Hata",
-        description: "NEXT_PUBLIC_IMGBB_API_KEY tanımlı değil. Lütfen URL girin.",
+        title: "Maksimum Görsel Limiti",
+        description: "Trendyol için en fazla 8 adet görsel eklenebilir.",
         variant: "destructive",
       });
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64 = (reader.result as string).split(",")[1];
-      const formData = new FormData();
-      formData.append("image", base64);
-      try {
-        const res = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
-          method: "POST",
-          body: formData,
-        });
-        const data = await res.json();
-        if (data.success && data.data?.display_url) {
-          const imgUrl = data.data.display_url;
-          setTableVariants((prev) =>
-            prev.map((r) =>
-              r.id === activeImageUploadRowId ? { ...r, images: [...r.images, imgUrl] } : r
-            )
-          );
-          toast({ title: "Görsel Yüklendi" });
-        } else {
-          toast({ title: "Yükleme Hatası", variant: "destructive" });
+    const availableSlots = 8 - currentVariant.images.length;
+    const filesToUpload = Array.from(files).slice(0, availableSlots);
+    if (filesToUpload.length === 0) return;
+
+    setIsUploadingImages(true);
+    const supabase = createClient();
+    const apiKey = process.env.NEXT_PUBLIC_IMGBB_API_KEY || "";
+
+    try {
+      // 1. İstemci taraflı paralel ultra hızlı sıkıştırma (10MB -> 200KB)
+      const compressedFiles = await compressImagesParallel(filesToUpload, {
+        maxWidth: 1600,
+        maxHeight: 1600,
+        quality: 0.85,
+        format: "image/jpeg",
+      });
+
+      // 2. Paralel olarak hepsini aynı anda yükle (Promise.all)
+      const uploadPromises = compressedFiles.map(async (file) => {
+        const cleanName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.jpg`;
+        const filePath = `products/trendyol/${cleanName}`;
+
+        // Supabase Storage dene
+        try {
+          const { error: sbErr } = await supabase.storage
+            .from("product-images")
+            .upload(filePath, file, { cacheControl: "31536000", upsert: false });
+
+          if (!sbErr) {
+            const { data: publicData } = supabase.storage.from("product-images").getPublicUrl(filePath);
+            if (publicData?.publicUrl) {
+              return { success: true, url: publicData.publicUrl, name: file.name };
+            }
+          }
+        } catch (err) {
+          console.warn("Supabase Storage yükleme denemesi:", err);
         }
-      } catch {
-        toast({ title: "Bağlantı Hatası", variant: "destructive" });
+
+        // ImgBB Fallback
+        if (apiKey) {
+          try {
+            const base64 = await new Promise<string>((resolve, reject) => {
+              const fr = new FileReader();
+              fr.onload = () => resolve((fr.result as string).split(",")[1]);
+              fr.onerror = reject;
+              fr.readAsDataURL(file);
+            });
+            const formData = new FormData();
+            formData.append("image", base64);
+            const res = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+              method: "POST",
+              body: formData,
+            });
+            const data = await res.json();
+            if (data.success && data.data?.display_url) {
+              return { success: true, url: data.data.display_url, name: file.name };
+            }
+          } catch (err) {
+            console.warn("ImgBB yükleme denemesi:", err);
+          }
+        }
+
+        return { success: false, url: null, name: file.name };
+      });
+
+      const results = await Promise.all(uploadPromises);
+      const uploadedUrls = results.filter((r) => r.success && r.url).map((r) => r.url as string);
+      const errors = results.filter((r) => !r.success).map((r) => r.name);
+
+      if (uploadedUrls.length > 0) {
+        setTableVariants((prev) =>
+          prev.map((r) =>
+            r.id === activeImageUploadRowId
+              ? { ...r, images: [...r.images, ...uploadedUrls].slice(0, 8) }
+              : r
+          )
+        );
+        toast({
+          title: "Görseller Eklendi",
+          description: `${uploadedUrls.length} adet görsel başarıyla yüklendi.`,
+        });
       }
-    };
-    reader.readAsDataURL(file);
+
+      if (errors.length > 0) {
+        toast({
+          title: "Bazı Dosyalar Yüklenemedi",
+          description: `Yüklenemeyenler: ${errors.join(", ")}. Doğrudan URL ile eklemeyi deneyebilirsiniz.`,
+          variant: "destructive",
+        });
+      }
+    } catch (err) {
+      console.error("Görsel yükleme genel hatası:", err);
+      toast({
+        title: "Yükleme Hatası",
+        description: "Görseller işlenirken bir sorun oluştu.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingImages(false);
+    }
+  };
+
+  // URL ile Görsel Ekleme (Tekli veya çoklu satır)
+  const handleAddImageUrl = () => {
+    if (!activeImageUploadRowId || !inputImageUrl.trim()) return;
+    const currentVariant = tableVariants.find((r) => r.id === activeImageUploadRowId);
+    if (!currentVariant) return;
+
+    if (currentVariant.images.length >= 8) {
+      toast({
+        title: "Limit Dolu",
+        description: "Trendyol için maksimum 8 görsel ekleyebilirsiniz.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const urls = inputImageUrl
+      .split(/[\n,]+/)
+      .map((u) => u.trim())
+      .filter((u) => u.startsWith("http://") || u.startsWith("https://"));
+
+    if (urls.length === 0) {
+      toast({
+        title: "Geçersiz URL",
+        description: "Lütfen geçerli bir resim linki (http/https) girin.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const availableSlots = 8 - currentVariant.images.length;
+    const addedUrls = urls.slice(0, availableSlots);
+
+    setTableVariants((prev) =>
+      prev.map((r) =>
+        r.id === activeImageUploadRowId
+          ? { ...r, images: [...r.images, ...addedUrls] }
+          : r
+      )
+    );
+
+    setInputImageUrl("");
+    toast({
+      title: "Görsel URL Eklendi",
+      description: `${addedUrls.length} adet görsel listeye eklendi.`,
+    });
+  };
+
+  const handleRemoveImageFromVariant = (variantId: string, index: number) => {
+    setTableVariants((prev) =>
+      prev.map((r) =>
+        r.id === variantId
+          ? { ...r, images: r.images.filter((_, idx) => idx !== index) }
+          : r
+      )
+    );
+  };
+
+  const handleSetCoverImage = (variantId: string, index: number) => {
+    if (index === 0) return;
+    setTableVariants((prev) =>
+      prev.map((r) => {
+        if (r.id !== variantId) return r;
+        const newImages = [...r.images];
+        const [target] = newImages.splice(index, 1);
+        newImages.unshift(target);
+        return { ...r, images: newImages };
+      })
+    );
+    toast({ title: "Kapak Görseli Seçildi", description: "Görsel 1. sıraya (Kapak) taşındı." });
+  };
+
+  const handleMoveImage = (variantId: string, fromIndex: number, toIndex: number) => {
+    setTableVariants((prev) =>
+      prev.map((r) => {
+        if (r.id !== variantId) return r;
+        if (toIndex < 0 || toIndex >= r.images.length) return r;
+        const newImages = [...r.images];
+        const [moved] = newImages.splice(fromIndex, 1);
+        newImages.splice(toIndex, 0, moved);
+        return { ...r, images: newImages };
+      })
+    );
+  };
+
+  const handleCopyImagesToAllVariants = (sourceVariantId: string) => {
+    const source = tableVariants.find((r) => r.id === sourceVariantId);
+    if (!source || source.images.length === 0) {
+      toast({
+        title: "Kopyalanacak Görsel Yok",
+        description: "Bu varyantta henüz görsel bulunmuyor.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setTableVariants((prev) =>
+      prev.map((r) => ({ ...r, images: [...source.images] }))
+    );
+
+    toast({
+      title: "Tüm Varyantlara Kopyalandı",
+      description: `${source.images.length} adet görsel tüm renk varyantlarına uygulandı.`,
+    });
+  };
+
+  const handleClearVariantImages = (variantId: string) => {
+    setTableVariants((prev) =>
+      prev.map((r) => (r.id === variantId ? { ...r, images: [] } : r))
+    );
+    toast({ title: "Görseller Temizlendi" });
   };
 
   // ─── ADIM DOĞRULAMA VE İLERLEME ────────────────────────────────────────────
@@ -652,31 +1196,143 @@ export function TrendyolProductCreateFlow({
     try {
       const commonBrandId = selectedBrand?.id || 1066155;
       const commonBrandName = selectedBrand?.name || brandSearchQuery || "ahenk tasarım";
-      const commonCategoryId = selectedCategory?.id || 1881;
+      const detectedCat = detectCategoryFromProduct({
+        title,
+        categoryName: selectedCategory?.name || categorySearchQuery,
+        category_id: selectedCategory?.id,
+      });
+      const commonCategoryId = selectedCategory?.id || detectedCat.id;
 
-      const baseAttributes = [
-        { attributeId: 338, customAttributeValue: material },
-        { attributeId: 1073, customAttributeValue: pieceCount },
-        { attributeId: 1040, customAttributeValue: origin },
-        ...(selectedHeight ? [{ attributeId: 286, customAttributeValue: selectedHeight }] : []),
-      ];
+      const itemsToSubmit = tableVariants.map((v, idx) => {
+        const vHeight = v.height?.trim() || "";
+        const vSize = v.size || determineSizeFromHeight(vHeight);
+        // Eğer satırda özel girilmiş ürün başlığı varsa onu kullan, yoksa ana başlığı doğrudan kullan (arkasına parantez içi boyut/renk ekleme)
+        const finalTitle = v.title?.trim() ? v.title.trim() : title.trim();
 
-      const itemsToSubmit = tableVariants.map((v) => ({
-        title: `${title.trim()} (${v.color})`,
-        barcode: v.barcode.trim(),
-        stockCode: v.stockCode.trim(),
-        salePrice: Number(v.salePrice) || 330,
-        listPrice: Number(v.salePrice) || 330,
-        quantity: Number(v.stock) || 20,
-        images: v.images,
-        desi: Number(desi) || 2,
-        vatRate: Number(v.vatRate) || 20,
-        attributes: [
-          ...baseAttributes,
-          { attributeId: 47, customAttributeValue: v.color },
-          { attributeId: 348, customAttributeValue: v.color },
-        ],
-      }));
+        // Kategori niteliklerine göre dinamik ve güvenli attribute eşleştirmesi
+        let variantAttributes: any[] = [];
+
+        if (Array.isArray(categoryAttributes) && categoryAttributes.length > 0) {
+          // Kategoride tanımlı attribute'lar varsa, sadece kategoride olanları eşleştir:
+          for (const catAttr of categoryAttributes) {
+            const attrId = catAttr.attribute?.id;
+            const attrName = (catAttr.attribute?.name || "").toLowerCase();
+            const values = catAttr.attributeValues || [];
+
+            // Değer bulucu yardımcı
+            const findValId = (valStr: string) => {
+              if (!valStr) return null;
+              const clean = valStr.trim().toLowerCase();
+              const matched = values.find(
+                (val: any) => (val.name || val.value || "").trim().toLowerCase() === clean
+              );
+              return matched?.id;
+            };
+
+            // 1. Renk
+            if (attrName.includes("renk") || attrId === 47 || attrId === 348) {
+              const targetColor = v.color || "Beyaz";
+              const valId = findValId(targetColor);
+              if (valId) {
+                variantAttributes.push({ attributeId: attrId, attributeValueId: valId });
+              } else {
+                variantAttributes.push({ attributeId: attrId, customAttributeValue: targetColor });
+              }
+              continue;
+            }
+
+            // 2. Materyal / Malzeme
+            if (attrName.includes("materyal") || attrName.includes("malzeme") || attrId === 338) {
+              const targetMat = material || "Plastik";
+              const valId = findValId(targetMat);
+              if (valId) {
+                variantAttributes.push({ attributeId: attrId, attributeValueId: valId });
+              } else {
+                variantAttributes.push({ attributeId: attrId, customAttributeValue: targetMat });
+              }
+              continue;
+            }
+
+            // 3. Parça Sayısı
+            if (attrName.includes("parça") || attrId === 1073) {
+              const targetCount = pieceCount || "1";
+              const valId = findValId(targetCount);
+              if (valId) {
+                variantAttributes.push({ attributeId: attrId, attributeValueId: valId });
+              } else {
+                variantAttributes.push({ attributeId: attrId, customAttributeValue: targetCount });
+              }
+              continue;
+            }
+
+            // 4. Menşei
+            if (attrName.includes("menşe") || attrId === 1040) {
+              const targetOrigin = origin || "TR - (Türkiye)";
+              const valId = findValId(targetOrigin) || findValId("Türkiye") || findValId("TR");
+              if (valId) {
+                variantAttributes.push({ attributeId: attrId, attributeValueId: valId });
+              } else {
+                variantAttributes.push({ attributeId: attrId, customAttributeValue: targetOrigin });
+              }
+              continue;
+            }
+
+            // 5. Boyut / Ebat (Mini, Midi, Büyük Boy)
+            if (attrName.includes("boyut") || attrName.includes("ebat") || attrId === 4402) {
+              const targetSize = vSize || "Midi";
+              const valId = findValId(targetSize);
+              if (valId) {
+                variantAttributes.push({ attributeId: attrId, attributeValueId: valId });
+              } else {
+                variantAttributes.push({ attributeId: attrId, customAttributeValue: targetSize });
+              }
+              continue;
+            }
+
+            // 6. Yükseklik / Boy
+            if ((attrName.includes("yükseklik") || attrName === "boy") && vHeight) {
+              const valId = findValId(vHeight);
+              if (valId) {
+                variantAttributes.push({ attributeId: attrId, attributeValueId: valId });
+              } else {
+                variantAttributes.push({ attributeId: attrId, customAttributeValue: vHeight });
+              }
+              continue;
+            }
+
+            // 7. Zorunlu (required/mandatory) alan olup yukarıdakilerle eşleşmediyse ilk geçerli değeri ver
+            if ((catAttr.required || catAttr.mandatory) && values.length > 0) {
+              variantAttributes.push({
+                attributeId: attrId,
+                attributeValueId: values[0].id,
+              });
+            }
+          }
+        } else {
+          // Kategoride HİÇBİR attribute tanımlı DEĞİLSE (Örn: Figür kategorisi gibi):
+          // Boş bırakılır çünkü tanımsız attributeId göndermek Trendyol API hatasına sebep olur
+          variantAttributes = [];
+        }
+
+        const effectiveModelCode = (!hasCategorySlicers && tableVariants.length > 1)
+          ? (v.stockCode.trim() || `${modelCode.trim()}-${vHeight || v.color || (idx + 1)}`)
+          : modelCode.trim();
+
+        return {
+          title: finalTitle,
+          barcode: v.barcode.trim(),
+          stockCode: v.stockCode.trim(),
+          modelCode: effectiveModelCode,
+          productMainId: effectiveModelCode,
+          salePrice: Number(v.salePrice) || 330,
+          listPrice: Number((v as any).listPrice || v.salePrice) || 330,
+          quantity: Math.min(Math.max(Number(v.stock) || 20, 1), 10000),
+          images: v.images,
+          desi: Number(desi) || 2,
+          vatRate: Number(v.vatRate) || 20,
+          attributes: variantAttributes,
+        };
+      });
 
       const payload = {
         model_code: modelCode.trim(),
@@ -713,12 +1369,21 @@ export function TrendyolProductCreateFlow({
         return;
       }
 
-      await confirm({
-        title: "🎉 Ürün Başarıyla Yüklendi!",
-        message: `Model Koduna (${modelCode}) bağlı ${itemsToSubmit.length} farklı renk varyantı tek seferde Trendyol'a iletildi.`,
-        confirmText: "Yüklü Ürünlerime Git",
-        variant: "info",
-      });
+      if (data.status === "approved") {
+        await confirm({
+          title: "🎉 Ürün Trendyol Tarafından Onaylandı!",
+          message: `Model Koduna (${modelCode}) bağlı ${itemsToSubmit.length} adet ürün Trendyol kataloğuna onaylı olarak eklendi ve yayına alındı.`,
+          confirmText: "Yüklü Ürünlerime Git",
+          variant: "info",
+        });
+      } else {
+        await confirm({
+          title: "🚀 Ürün Trendyol'a İletildi",
+          message: `Model Koduna (${modelCode}) bağlı ${itemsToSubmit.length} adet ürün Trendyol sistemine başarıyla kaydedildi (Takip Kodu: ${data.batch_id || "Kayıtlı"}). Trendyol'un ürünleri listelemesi birkaç dakika sürebilir.`,
+          confirmText: "Yüklü Ürünlerime Git",
+          variant: "info",
+        });
+      }
 
       if (onSuccess) {
         onSuccess();
@@ -772,15 +1437,17 @@ export function TrendyolProductCreateFlow({
         </div>
       )}
 
-      {/* Gizli Görsel Seçim Inputu */}
+      {/* Gizli Çoklu Görsel Seçim Inputu */}
       <input
         type="file"
-        ref={fileInputRef}
+        ref={multiFileInputRef}
+        multiple
         accept="image/*"
         className="hidden"
         onChange={(e) => {
-          if (e.target.files && e.target.files[0]) {
-            handleUploadImageForVariant(e.target.files[0]);
+          if (e.target.files && e.target.files.length > 0) {
+            handleUploadFiles(e.target.files);
+            e.target.value = "";
           }
         }}
       />
@@ -857,6 +1524,37 @@ export function TrendyolProductCreateFlow({
 
         {/* SAĞ: İÇERİK BÖLÜMÜ (single-product__right) */}
         <div className="lg:col-span-9 space-y-6">
+          {importedSource && (
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-orange-500/10 via-amber-500/10 to-orange-500/5 border border-orange-500/30 flex items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-sm">
+                  {importedSource === "makerworld" ? "MW" : "STK"}
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-foreground flex items-center gap-2">
+                    {importedSource === "makerworld"
+                      ? "MakerWorld'den Ürün Bilgileri Aktarıldı"
+                      : "Stok Kataloğundan Ürün Bilgileri Aktarıldı"}
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-700 dark:text-orange-300 font-semibold">
+                      Hazır Taslak
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Görseller, başlık, açıklama ve fiyat bilgileri yüklendi. Bilgileri düzenleyebilir ve eksik Trendyol alanlarını onaylayabilirsiniz.
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setImportedSource(null)}
+                className="h-7 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Gizle
+              </Button>
+            </div>
+          )}
+
           {/* ═══════════════════════════════════════════════════════════════
               ADIM 0: ÜRÜN BİLGİLERİ
              ═══════════════════════════════════════════════════════════════ */}
@@ -936,7 +1634,7 @@ export function TrendyolProductCreateFlow({
                         setShowCategoryDropdown(true);
                       }
                     }}
-                    placeholder="Kategori aramak için en az 2 harf yazın (Örn: Vazo, Saksı...)"
+                    placeholder="Kategori aramak için en az 2 harf yazın (Örn: Figür, Vazo, Biblo...)"
                     className="text-xs h-10 pr-16"
                   />
                   <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
@@ -970,7 +1668,17 @@ export function TrendyolProductCreateFlow({
                       <button
                         key={cat.id}
                         type="button"
-                        onClick={() => {
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedCategory(cat);
+                          setCategorySearchQuery(cat.name);
+                          setShowCategoryDropdown(false);
+                          isCategoryFocusedRef.current = false;
+                        }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
                           setSelectedCategory(cat);
                           setCategorySearchQuery(cat.name);
                           setShowCategoryDropdown(false);
@@ -1075,7 +1783,17 @@ export function TrendyolProductCreateFlow({
                           <button
                             key={brand.id}
                             type="button"
-                            onClick={() => {
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setSelectedBrand(brand);
+                              setBrandSearchQuery(brand.name);
+                              setShowBrandDropdown(false);
+                              isBrandFocusedRef.current = false;
+                            }}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
                               setSelectedBrand(brand);
                               setBrandSearchQuery(brand.name);
                               setShowBrandDropdown(false);
@@ -1329,40 +2047,113 @@ export function TrendyolProductCreateFlow({
           {currentStep === 3 && (
             <div className="bg-card border border-border rounded-2xl p-6 sm:p-7 shadow-sm space-y-6 animate-in fade-in duration-200">
               {/* Başlık ve Sağdaki Eğitim Linki */}
-              <div className="flex items-center justify-between border-b border-border pb-4">
-                <h3 className="text-base sm:text-lg font-bold text-foreground">
-                  Satış ve Varyant Bilgileri
-                </h3>
-                <a
-                  href="https://partner.trendyol.com"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Varyantlı Ürün Ekleme Eğitimi
-                </a>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-4">
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-foreground flex items-center gap-2">
+                    <Store className="w-5 h-5 text-orange-600" />
+                    Satış ve Varyant Bilgileri
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Model Kodu: <span className="font-mono font-bold text-foreground">{modelCode || "Belirtilmedi"}</span> | Kategori: <span className="font-medium text-foreground">{selectedCategory?.name || "Kategori Seçilmedi"}</span>
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    onClick={() => handleAddNewCloneRow()}
+                    className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs h-9 px-4 rounded-xl shadow-sm cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4 mr-1.5" />
+                    + Yeni Ürün / Kopya Ekle
+                  </Button>
+                  <a
+                    href="https://partner.trendyol.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Trendyol Rehberi
+                  </a>
+                </div>
               </div>
 
-              {/* Slicer 1: Yükseklik * */}
+              {/* ─── KATEGORİ VARYANT (SLICER) DESTEĞİ KONTROLÜ & TEK TEK EKLEME BANNERI ─── */}
+              {!hasCategorySlicers && (
+                <div className="p-4 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-500/10 dark:bg-amber-950/25 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <h4 className="text-xs sm:text-sm font-bold text-amber-900 dark:text-amber-300">
+                        Bu Kategoride Trendyol Varyant Eklemeye İzin Vermiyor!
+                      </h4>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Seçilen <strong className="text-foreground">{selectedCategory?.name}</strong> kategorisinde (Figür, Biblo vb.) Trendyol renk/beden gibi doğrudan varyant girişini desteklemez.
+                      </p>
+                      <p className="text-xs font-semibold text-foreground pt-0.5">
+                        Farklı renk ve boyutlardaki ürünlerinizi aynı Model Kodu (<span className="font-mono text-orange-600 font-bold">{modelCode || "OTOMATİK"}</span>) altında <strong>Tek Tek</strong> eklemek ister misiniz?
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-amber-200/70 dark:border-amber-900/50">
+                    <Button
+                      type="button"
+                      onClick={() => handleAddNewCloneRow()}
+                      className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs h-9 px-4 rounded-lg shadow-sm cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4 mr-1.5" />
+                      Evet, Tek Tek / Kopya Ürün Ekle
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">
+                      Her kopya bağımsız barkod, stok kodu, %20 KDV, TR menşei ve kendi görseliyle oluşturulur; ürün adı, fiyat ve stok bilgilerini siz girersiniz.
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* ─── EN ÇOK FİLTRELENEN ALANLAR (ÖNERİLEN): BOYUT ─── */}
+              <div className="border border-border/80 rounded-xl p-4 bg-muted/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-foreground">En Çok Filtrelenen Alanlar</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-400 border border-orange-200 dark:border-orange-800">
+                      Önerilen
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground font-medium">
+                    10 cm altı: <strong>Mini</strong> | 10 - 20 cm: <strong>Midi</strong> | 20 cm+: <strong>Büyük Boy</strong>
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Bu kategoride müşteriler en çok <strong>Boyut</strong> özelliğine göre filtreleme yapıyor. Yükseklik seçtiğinizde ürün boyutu otomatik hesaplanır veya tablodan kendiniz belirleyebilirsiniz.
+                </p>
+              </div>
+
+              {/* Slicer 1: Yükseklik */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-foreground">
-                  Yükseklik <span className="text-red-500">*</span>
+                  Varsayılan Yükseklik Seçimi
                 </Label>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Aşağıda eklenecek yeni ürünler ve varyantlar için varsayılan yükseklik belirleyin (Tablodan her satırın yüksekliğini tek tek değiştirebilirsiniz).
+                </p>
                 <div className="relative">
                   <select
                     value={selectedHeight}
                     onChange={(e) => {
-                      const newHeight = e.target.value;
-                      setSelectedHeight(newHeight);
-                      setTableVariants((prev) => prev.map((r) => ({ ...r, height: newHeight })));
+                      setSelectedHeight(e.target.value);
                     }}
                     className="w-full h-10 px-3 pr-10 text-xs rounded-xl border border-input bg-background font-medium appearance-none focus:ring-2 focus:ring-orange-500 focus:outline-none"
                   >
-                    <option value="">Yükseklik Seçin</option>
+                    <option value="">Yükseklik Seçin (Örn: 10 cm, 15 cm, 20 cm, 25 cm)</option>
+                    {selectedHeight && !TRENDYOL_HEIGHTS.includes(selectedHeight) && (
+                      <option value={selectedHeight}>
+                        {selectedHeight} {determineSizeFromHeight(selectedHeight) ? `(${determineSizeFromHeight(selectedHeight)})` : ""}
+                      </option>
+                    )}
                     {TRENDYOL_HEIGHTS.map((h) => (
                       <option key={h} value={h}>
-                        {h}
+                        {h} {determineSizeFromHeight(h) ? `(${determineSizeFromHeight(h)})` : ""}
                       </option>
                     ))}
                   </select>
@@ -1384,14 +2175,14 @@ export function TrendyolProductCreateFlow({
                 </div>
               </div>
 
-              {/* Slicer 2: Renk * */}
+              {/* Slicer 2: Renk (Kategori destekliyorsa veya serbest renk seçimi) */}
               <div className="space-y-2">
                 <div>
                   <Label className="text-xs font-semibold text-foreground">
-                    Renk <span className="text-red-500">*</span>
+                    Renk Seçimi & Varyant Ekleme
                   </Label>
                   <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                    Müşterilerin filtreleme alanında gösterilecek rengi, renk skalası alanından seçebilirsiniz. Ürünün detaylı renk bilgisini ise renk ismi alanına girebilirsiniz. Bu bilgi, ürün detayında müşterilere gösterilir.
+                    Müşterilerin filtreleme alanında gösterilecek rengi skaladan seçin. Ürünün detaylı renk bilgisini ise renk ismi alanına girebilirsiniz.
                   </p>
                 </div>
 
@@ -1433,12 +2224,12 @@ export function TrendyolProductCreateFlow({
                       disabled={!inputColorScale}
                       className="w-full h-10 text-xs font-bold border-border hover:border-orange-500/60 hover:text-orange-600 cursor-pointer"
                     >
-                      Renk Ekle
+                      Varyant Ekle
                     </Button>
                   </div>
                 </div>
 
-                {/* Eklenen Renk Çipleri (Bej X, Gri X) */}
+                {/* Eklenen Renk/Varyant Çipleri */}
                 {colorChips.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2 pt-2">
                     {colorChips.map((chip) => (
@@ -1452,10 +2243,15 @@ export function TrendyolProductCreateFlow({
                             backgroundColor: COLOR_HEX_MAP[chip.webColor] || "#9e9e9e",
                           }}
                         />
-                        {chip.customName || chip.webColor}
+                        <span>{chip.customName || chip.webColor}</span>
+                        {chip.height && (
+                          <span className="text-[10px] text-muted-foreground font-medium bg-background/80 px-1.5 py-0.5 rounded border border-border/50">
+                            {chip.height}
+                          </span>
+                        )}
                         <button
                           type="button"
-                          onClick={() => handleRemoveColorChip(chip.id, chip.webColor)}
+                          onClick={() => handleRemoveColorChip(chip.id)}
                           className="hover:text-red-500 cursor-pointer ml-0.5"
                         >
                           <X className="w-3.5 h-3.5" />
@@ -1504,6 +2300,25 @@ export function TrendyolProductCreateFlow({
                       />
                     </div>
 
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-semibold text-muted-foreground">Toplu Yükseklik</Label>
+                      <select
+                        value={bulkHeight}
+                        onChange={(e) => setBulkHeight(e.target.value)}
+                        className="h-9 px-3 text-xs rounded-md border border-input bg-background font-medium w-32 focus:outline-none"
+                      >
+                        <option value="">Değiştirme</option>
+                        {bulkHeight && !TRENDYOL_HEIGHTS.includes(bulkHeight) && (
+                          <option value={bulkHeight}>{bulkHeight}</option>
+                        )}
+                        {TRENDYOL_HEIGHTS.map((h) => (
+                          <option key={h} value={h}>
+                            {h}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
                     <Button
                       type="button"
                       variant="outline"
@@ -1517,12 +2332,10 @@ export function TrendyolProductCreateFlow({
                 </div>
               )}
 
-              {/* ─── VARYANT TABLOSU (TRENDYOL BİREBİR) ─── */}
+              {/* ─── VARYANT / ÜRÜN TABLOSU ─── */}
               <div className="border border-border rounded-xl overflow-hidden bg-background">
-                {/* DURUM 1: HENÜZ HİÇBİR VARYANT BULUNMUYOR (SCREENSHOT 1) */}
                 {tableVariants.length === 0 ? (
-                  <div className="py-16 px-4 flex flex-col items-center justify-center text-center space-y-3">
-                    {/* Trendyol Turuncu Paket İllüstrasyonu */}
+                  <div className="py-16 px-4 flex flex-col items-center justify-center text-center space-y-4">
                     <div className="relative w-20 h-20 flex items-center justify-center">
                       <div className="w-16 h-16 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shadow-sm">
                         <Store className="w-8 h-8 text-amber-600" />
@@ -1532,17 +2345,27 @@ export function TrendyolProductCreateFlow({
                       </span>
                     </div>
 
-                    <div className="space-y-1 max-w-md">
+                    <div className="space-y-1.5 max-w-md">
                       <h4 className="text-sm font-bold text-foreground">
-                        Henüz hiçbir varyant bulunmuyor!
+                        Henüz ürün veya varyant eklenmedi!
                       </h4>
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        Satış bilgilerini girmek için ürün bilgilerinizi doldurmalısınız. Doldurmanız gereken alanlar <strong>Renk, Yükseklik</strong>
+                        {!hasCategorySlicers
+                          ? "Bu kategoride varyant eklenmiyor. Aynı model kodu altında tek tek ürün girişi yapmak için butona tıklayın."
+                          : "Satış bilgilerini girmek için yukarıdan Renk seçip Varyant Ekle'ye basabilir veya doğrudan kopya ürün ekleyebilirsiniz."}
                       </p>
                     </div>
+
+                    <Button
+                      type="button"
+                      onClick={() => handleAddNewCloneRow()}
+                      className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs h-10 px-5 rounded-xl shadow-md cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4 mr-1.5" />
+                      {hasCategorySlicers ? "+ Yeni Ürün Satırı Ekle" : "+ İlk Ürünü / Kopyayı Ekle"}
+                    </Button>
                   </div>
                 ) : (
-                  /* DURUM 2: VARYANTLAR DOLU TABLO (SCREENSHOT 2) */
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs text-left border-collapse">
                       <thead>
@@ -1556,24 +2379,30 @@ export function TrendyolProductCreateFlow({
                             />
                           </th>
                           <th className="p-3 whitespace-nowrap min-w-[70px]">Görsel</th>
+                          <th className="p-3 whitespace-nowrap min-w-[170px]">Ürün Başlığı</th>
                           <th className="p-3 whitespace-nowrap min-w-[100px]">Renk</th>
-                          <th className="p-3 whitespace-nowrap min-w-[90px]">Yükseklik</th>
+                          <th className="p-3 whitespace-nowrap min-w-[95px]">Yükseklik</th>
+                          <th className="p-3 whitespace-nowrap min-w-[100px]">
+                            <span className="flex items-center gap-1">
+                              Boyut <span className="text-[10px] font-normal text-orange-600">(Filtre)</span>
+                            </span>
+                          </th>
                           <th className="p-3 whitespace-nowrap min-w-[120px]">Barkod</th>
                           <th className="p-3 whitespace-nowrap min-w-[120px]">Trendyol Satış Fiyatı</th>
-                          <th className="p-3 whitespace-nowrap min-w-[90px]">Stok</th>
-                          <th className="p-3 whitespace-nowrap min-w-[80px]">KDV</th>
-                          <th className="p-3 whitespace-nowrap min-w-[80px]">
+                          <th className="p-3 whitespace-nowrap min-w-[85px]">Stok</th>
+                          <th className="p-3 whitespace-nowrap min-w-[75px]">KDV</th>
+                          <th className="p-3 whitespace-nowrap min-w-[75px]">
                             <span className="flex items-center gap-1">
                               ÖTV <HelpCircle className="w-3 h-3 opacity-60" />
                             </span>
                           </th>
                           <th className="p-3 whitespace-nowrap min-w-[130px]">Stok Kodu</th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px]">
+                          <th className="p-3 whitespace-nowrap min-w-[110px]">
                             <span className="flex items-center gap-1">
-                              Parti/Lot/SKT Bilgisi <HelpCircle className="w-3 h-3 opacity-60" />
+                              Parti/Lot <HelpCircle className="w-3 h-3 opacity-60" />
                             </span>
                           </th>
-                          <th className="p-3 w-12 text-center">İşlem</th>
+                          <th className="p-3 w-20 text-center">İşlem</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/60">
@@ -1589,36 +2418,55 @@ export function TrendyolProductCreateFlow({
                               />
                             </td>
 
-                            {/* Görsel Yükleme (Trendyol Turuncu Kesikli Kutu) */}
+                            {/* Görsel Yükleme / Değiştirme */}
                             <td className="p-3">
                               {row.images.length === 0 ? (
                                 <button
                                   type="button"
                                   onClick={() => {
                                     setActiveImageUploadRowId(row.id);
-                                    fileInputRef.current?.click();
+                                    setIsImageManagerOpen(true);
                                   }}
-                                  className="w-12 h-12 rounded-lg border-2 border-dashed border-orange-400/80 bg-orange-500/5 hover:bg-orange-500/15 flex flex-col items-center justify-center text-orange-600 cursor-pointer transition-colors shadow-2xs group"
-                                  title="Fotoğraf Yükle"
+                                  className="w-14 h-14 rounded-xl border-2 border-dashed border-orange-400/80 bg-orange-500/5 hover:bg-orange-500/15 flex flex-col items-center justify-center text-orange-600 cursor-pointer transition-all shadow-2xs group hover:scale-105"
+                                  title="Fotoğraf Ekle & Yönet"
                                 >
                                   <Camera className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                                  <span className="text-[9px] font-bold mt-0.5">Görsel Ekle</span>
                                 </button>
                               ) : (
-                                <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-border group">
+                                <div
+                                  onClick={() => {
+                                    setActiveImageUploadRowId(row.id);
+                                    setIsImageManagerOpen(true);
+                                  }}
+                                  className="relative w-14 h-14 rounded-xl overflow-hidden border-2 border-orange-500/50 hover:border-orange-600 group cursor-pointer shadow-sm transition-all hover:scale-105"
+                                  title="Görselleri Değiştirmek / Yönetmek İçin Tıklayın"
+                                >
                                   <img
                                     src={row.images[0]}
                                     alt=""
-                                    className="w-full h-full object-cover"
+                                    loading="lazy"
+                                    decoding="async"
+                                    className="w-full h-full object-cover transition-opacity duration-200"
                                   />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateRowField(row.id, "images", [])}
-                                    className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white cursor-pointer transition-opacity"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                                  </button>
+                                  <span className="absolute bottom-0 inset-x-0 bg-black/75 text-white text-[9px] font-bold text-center py-0.5 tracking-tight backdrop-blur-xs">
+                                    {row.images.length} Görsel
+                                  </span>
+                                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-1 text-white transition-opacity">
+                                    <Eye className="w-4 h-4" />
+                                  </div>
                                 </div>
                               )}
+                            </td>
+
+                            {/* Ürün Başlığı (Tek tek veya varyant başlığı) */}
+                            <td className="p-3">
+                              <Input
+                                value={row.title || ""}
+                                onChange={(e) => handleUpdateRowField(row.id, "title", e.target.value)}
+                                placeholder={title || "Ürün Adı (Boşsa ana başlık kullanılır)"}
+                                className="h-8 text-xs font-medium w-48"
+                              />
                             </td>
 
                             {/* Renk (Daire + Metin) */}
@@ -1634,12 +2482,40 @@ export function TrendyolProductCreateFlow({
                               </div>
                             </td>
 
-                            {/* Yükseklik */}
-                            <td className="p-3 whitespace-nowrap text-muted-foreground font-medium">
-                              {row.height}
+                            {/* Yükseklik (Satır Bazlı Seçilebilir Dropdown) */}
+                            <td className="p-3 whitespace-nowrap">
+                              <select
+                                value={row.height || ""}
+                                onChange={(e) => handleUpdateVariantHeight(row.id, e.target.value)}
+                                className="h-8 px-2 text-xs rounded-md border border-input bg-background font-medium w-28 focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                              >
+                                <option value="">Seçiniz</option>
+                                {row.height && !TRENDYOL_HEIGHTS.includes(row.height) && (
+                                  <option value={row.height}>{row.height}</option>
+                                )}
+                                {TRENDYOL_HEIGHTS.map((h) => (
+                                  <option key={h} value={h}>
+                                    {h}
+                                  </option>
+                                ))}
+                              </select>
                             </td>
 
-                            {/* Barkod */}
+                            {/* Boyut (Mini, Midi, Büyük Boy) */}
+                            <td className="p-3 whitespace-nowrap">
+                              <select
+                                value={row.size || determineSizeFromHeight(row.height || "")}
+                                onChange={(e) => handleUpdateRowField(row.id, "size", e.target.value)}
+                                className="h-8 px-2 text-xs rounded-md border border-orange-300 dark:border-orange-800 bg-orange-50/50 dark:bg-orange-950/20 font-bold text-orange-700 dark:text-orange-400 w-24 focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                              >
+                                <option value="">Seçiniz</option>
+                                <option value="Mini">Mini (&lt;10cm)</option>
+                                <option value="Midi">Midi (10-20cm)</option>
+                                <option value="Büyük Boy">Büyük Boy (20cm+)</option>
+                              </select>
+                            </td>
+
+                            {/* Barkod (Otomatik EAN-13, düzenlenebilir) */}
                             <td className="p-3">
                               <Input
                                 value={row.barcode}
@@ -1648,30 +2524,32 @@ export function TrendyolProductCreateFlow({
                               />
                             </td>
 
-                            {/* Trendyol Satış Fiyatı */}
+                            {/* Trendyol Satış Fiyatı (Boş, kullanıcı girer) */}
                             <td className="p-3">
                               <Input
                                 type="number"
                                 value={row.salePrice}
                                 onChange={(e) => handleUpdateRowField(row.id, "salePrice", e.target.value)}
+                                placeholder="0,00"
                                 className="h-8 text-xs font-medium w-24"
                               />
                             </td>
 
-                            {/* Stok */}
+                            {/* Stok (Boş, kullanıcı girer) */}
                             <td className="p-3">
                               <Input
                                 type="number"
                                 value={row.stock}
                                 onChange={(e) => handleUpdateRowField(row.id, "stock", e.target.value)}
+                                placeholder="0"
                                 className="h-8 text-xs font-medium w-20"
                               />
                             </td>
 
-                            {/* KDV */}
+                            {/* KDV (Sabit %20) */}
                             <td className="p-3">
                               <select
-                                value={row.vatRate}
+                                value={row.vatRate || "20"}
                                 onChange={(e) => handleUpdateRowField(row.id, "vatRate", e.target.value)}
                                 className="h-8 px-2 text-xs rounded-md border border-input bg-background font-medium w-16 focus:outline-none"
                               >
@@ -1692,7 +2570,7 @@ export function TrendyolProductCreateFlow({
                               />
                             </td>
 
-                            {/* Stok Kodu */}
+                            {/* Stok Kodu (Otomatik üretilir, düzenlenebilir) */}
                             <td className="p-3">
                               <Input
                                 value={row.stockCode}
@@ -1710,16 +2588,26 @@ export function TrendyolProductCreateFlow({
                               />
                             </td>
 
-                            {/* İşlem (Sil) */}
+                            {/* İşlemler: Kopya Oluştur (+1) ve Sil */}
                             <td className="p-3 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveVariantRow(row.id)}
-                                className="text-muted-foreground hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
-                                title="Varyantı Sil"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddNewCloneRow(row)}
+                                  className="text-muted-foreground hover:text-orange-600 p-1.5 rounded-md hover:bg-orange-50 dark:hover:bg-orange-950/30 transition-colors cursor-pointer"
+                                  title="Bu Ürünün Kopyasını Oluştur (+1)"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveVariantRow(row.id)}
+                                  className="text-muted-foreground hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
+                                  title="Varyantı Sil"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1781,6 +2669,297 @@ export function TrendyolProductCreateFlow({
           </div>
         </div>
       </div>
+
+      {/* ─── ÇOKLU GÖRSEL YÖNETİMİ MODALI (Trendyol Max 8 Görsel) ─── */}
+      <Dialog
+        open={isImageManagerOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsImageManagerOpen(false);
+            setActiveImageUploadRowId(null);
+            setInputImageUrl("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          {(() => {
+            const currentVariant = tableVariants.find((r) => r.id === activeImageUploadRowId);
+            if (!currentVariant) return null;
+
+            return (
+              <div className="space-y-5">
+                <DialogHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <DialogTitle className="text-base font-bold flex items-center gap-2">
+                        <ImageIcon className="w-5 h-5 text-orange-600" />
+                        Görsel Yönetimi & Çoklu Yükleme
+                      </DialogTitle>
+                      <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                        <span className="font-semibold text-foreground">
+                          {currentVariant.customColorName || currentVariant.color}
+                        </span>{" "}
+                        varyantı için görselleri düzenleyin (İlk görsel ana kapak görselidir).
+                      </DialogDescription>
+                    </div>
+                    <span
+                      className={`text-xs px-2.5 py-1 rounded-full font-bold border ${
+                        currentVariant.images.length === 0
+                          ? "border-amber-500/40 text-amber-600 bg-amber-500/10"
+                          : currentVariant.images.length >= 8
+                          ? "border-emerald-500/40 text-emerald-600 bg-emerald-500/10"
+                          : "border-orange-500/40 text-orange-600 bg-orange-500/10"
+                      }`}
+                    >
+                      {currentVariant.images.length} / 8 Görsel
+                    </span>
+                  </div>
+                </DialogHeader>
+
+                {/* YÜKLEME SEÇENEKLERİ (Dosya Seç + URL ile Ekle) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3.5 bg-muted/30 border border-border rounded-xl">
+                  {/* Dosyadan Çoklu Yükle */}
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        handleUploadFiles(e.dataTransfer.files);
+                      }
+                    }}
+                    className="space-y-2"
+                  >
+                    <input
+                      type="file"
+                      ref={multiFileInputRef}
+                      multiple
+                      accept="image/png,image/jpeg,image/webp,image/jpg"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files.length > 0) {
+                          handleUploadFiles(e.target.files);
+                          e.target.value = "";
+                        }
+                      }}
+                    />
+                    <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Upload className="w-3.5 h-3.5 text-orange-600" />
+                      Bilgisayardan Yükle / Sürükle Bırak
+                    </Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={isUploadingImages || currentVariant.images.length >= 8}
+                      onClick={() => multiFileInputRef.current?.click()}
+                      className="w-full h-10 text-xs font-semibold border-dashed border-orange-400/80 hover:bg-orange-500/10 hover:border-orange-500 text-orange-700 dark:text-orange-300 cursor-pointer"
+                    >
+                      {isUploadingImages ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin text-orange-600" />
+                          Hızlı Sıkıştırılıyor & Yükleniyor...
+                        </>
+                      ) : (
+                        <>
+                          <Camera className="w-4 h-4 mr-2" />
+                          Fotoğrafları Seç veya Sürükle (Çoklu)
+                        </>
+                      )}
+                    </Button>
+                    <p className="text-[10px] text-muted-foreground">
+                      PNG, JPG, WebP formatında birden fazla resim seçebilir veya sürükleyebilirsiniz (Otomatik optimize edilir).
+                    </p>
+                  </div>
+
+                  {/* URL ile Ekle */}
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <LinkIcon className="w-3.5 h-3.5 text-blue-600" />
+                      URL ile Görsel Ekle
+                    </Label>
+                    <div className="flex gap-1.5">
+                      <Input
+                        value={inputImageUrl}
+                        onChange={(e) => setInputImageUrl(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleAddImageUrl();
+                          }
+                        }}
+                        placeholder="https://... (veya virgülle çoklu)"
+                        className="h-10 text-xs"
+                        disabled={currentVariant.images.length >= 8}
+                      />
+                      <Button
+                        type="button"
+                        onClick={handleAddImageUrl}
+                        disabled={!inputImageUrl.trim() || currentVariant.images.length >= 8}
+                        className="h-10 px-3.5 text-xs font-bold bg-orange-600 hover:bg-orange-700 text-white shrink-0 cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4 mr-1" />
+                        Ekle
+                      </Button>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Doğrudan görsel linki yapıştırıp Ekle'ye basabilirsiniz.
+                    </p>
+                  </div>
+                </div>
+
+                {/* YÜKLENEN GÖRSELLER LİSTESİ (Galeri Görünümü) */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                      <Layers className="w-4 h-4 text-muted-foreground" />
+                      Yüklü Görseller ({currentVariant.images.length})
+                    </h4>
+                    {currentVariant.images.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleClearVariantImages(currentVariant.id)}
+                        className="text-[11px] font-semibold text-red-500 hover:text-red-600 hover:underline cursor-pointer"
+                      >
+                        Tümünü Temizle
+                      </button>
+                    )}
+                  </div>
+
+                  {currentVariant.images.length === 0 ? (
+                    <div className="py-10 border-2 border-dashed border-border rounded-xl flex flex-col items-center justify-center text-center p-4">
+                      <div className="w-12 h-12 rounded-xl bg-muted/60 flex items-center justify-center text-muted-foreground mb-2">
+                        <ImageIcon className="w-6 h-6" />
+                      </div>
+                      <p className="text-xs font-semibold text-foreground">Henüz görsel eklenmedi</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Yukarıdaki butonlarla bilgisayarınızdan çoklu resim yükleyin veya link yapıştırın.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {currentVariant.images.map((imgUrl, idx) => {
+                        const isCover = idx === 0;
+                        return (
+                          <div
+                            key={idx}
+                            className={`group relative rounded-xl overflow-hidden border-2 transition-all bg-card ${
+                              isCover
+                                ? "border-orange-500 shadow-md ring-2 ring-orange-500/20"
+                                : "border-border hover:border-border/80"
+                            }`}
+                          >
+                            {/* Resim Önizleme */}
+                            <div className="aspect-square relative overflow-hidden bg-muted/20">
+                              <img
+                                src={imgUrl}
+                                alt={`Görsel ${idx + 1}`}
+                                loading="lazy"
+                                decoding="async"
+                                className="w-full h-full object-cover transition-opacity duration-200"
+                              />
+                              {/* Kapak Rozeti */}
+                              {isCover ? (
+                                <span className="absolute top-1.5 left-1.5 bg-orange-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                                  <Star className="w-2.5 h-2.5 fill-white" />
+                                  Kapak Görseli
+                                </span>
+                              ) : (
+                                <span className="absolute top-1.5 left-1.5 bg-black/60 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md">
+                                  #{idx + 1}
+                                </span>
+                              )}
+
+                              {/* Hover Aksiyonları */}
+                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
+                                <div className="flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveImageFromVariant(currentVariant.id, idx)}
+                                    className="w-7 h-7 rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center justify-center cursor-pointer shadow-sm"
+                                    title="Görseli Sil"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-1">
+                                  {idx > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveImage(currentVariant.id, idx, idx - 1)}
+                                      className="w-7 h-7 rounded-lg bg-white/20 hover:bg-white/40 text-white flex items-center justify-center cursor-pointer"
+                                      title="Sola Taşı"
+                                    >
+                                      <ArrowLeft className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                  {!isCover && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetCoverImage(currentVariant.id, idx)}
+                                      className="flex-1 py-1 px-1.5 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-[10px] font-bold text-center cursor-pointer"
+                                      title="Kapak Görseli Yap"
+                                    >
+                                      Kapak Yap
+                                    </button>
+                                  )}
+                                  {idx < currentVariant.images.length - 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveImage(currentVariant.id, idx, idx + 1)}
+                                      className="w-7 h-7 rounded-lg bg-white/20 hover:bg-white/40 text-white flex items-center justify-center cursor-pointer"
+                                      title="Sağa Taşı"
+                                    >
+                                      <ArrowRight className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* ALT KONTROLLER: Tüm varyantlara kopyalama ve kapatma */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-border">
+                  {tableVariants.length > 1 && currentVariant.images.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleCopyImagesToAllVariants(currentVariant.id)}
+                      className="text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5 mr-1.5" />
+                      Bu Görselleri Tüm Varyantlara Kopyala
+                    </Button>
+                  )}
+
+                  <div className="flex items-center gap-2 ml-auto">
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        setIsImageManagerOpen(false);
+                        setActiveImageUploadRowId(null);
+                      }}
+                      className="bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold px-5 h-9 rounded-xl cursor-pointer"
+                    >
+                      <Check className="w-4 h-4 mr-1.5" />
+                      Tamamla
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
 
       {/* ONAY POP-UP MODALI */}
       <ConfirmDialog />

@@ -782,29 +782,73 @@ export function HepsiburadaCalculatorClient() {
     customPrice: "", // Belirlenen özel satış fiyatı
   });
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("hepsiburadaSettings");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const isOrg = parsed.organicSalesMode !== undefined
-            ? Boolean(parsed.organicSalesMode)
-            : false;
-        setSettings(prev => ({
-          ...DEFAULT_HEPSIBURADA_SETTINGS,
-          ...parsed,
-          organicSalesMode: isOrg,
-          advertisingRate: isOrg ? 0 : (parsed.advertisingRate ?? 8),
-        }));
-      }
-    } catch { /* ignore */ }
-  }, []);
-
-  useEffect(() => {
+    let initialProducts: HepsiburadaProduct[] = [];
     const saved = localStorage.getItem("hepsiburadaProducts");
     if (saved) {
-      try { setProducts(JSON.parse(saved)); }
-      catch { /* ignore */ }
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) initialProducts = parsed;
+      } catch { /* ignore */ }
     }
+
+    // Fiyatlandırma sayfasından yönlendirme parametrelerini otomatik oku ve hesapla
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      const w = sp.get("weight");
+      const name = sp.get("name");
+
+      if (w || name) {
+        const pName = name?.trim() || "Fiyatlandırma Ürünü";
+        const numWeight = parseFloat(w || "100") || 100;
+        const numQty = parseInt(sp.get("qty") || "1") || 1;
+        const candle = sp.get("candle") === "1";
+        const keychain = sp.get("keychain") === "1";
+        const soap = sp.get("soap") === "1";
+        const simPriceParam = sp.get("simPrice") || sp.get("price");
+        const cargoParam = sp.get("cargo");
+
+        setProductName(pName);
+        setWeightGrams(String(numWeight));
+        setQuantity(String(numQty));
+        setPendingFlags({ isCandleholder: candle, isKeychain: keychain, isSoapdish: soap });
+
+        if (cargoParam) {
+          upd({ cargoCompany: cargoParam });
+        }
+
+        const newId = Date.now().toString();
+        const fromName = detectProductTypeFlags(pName);
+        const newProd: HepsiburadaProduct = {
+          id: newId,
+          productName: pName,
+          weightGrams: numWeight,
+          quantity: numQty,
+          isCandleholder: candle || fromName.isCandleholder,
+          isKeychain: keychain || fromName.isKeychain,
+          isSoapdish: soap || fromName.isSoapdish,
+        };
+
+        if (simPriceParam && !isNaN(parseFloat(simPriceParam)) && parseFloat(simPriceParam) > 0) {
+          setCustomPrices(prev => ({ ...prev, [newId]: simPriceParam }));
+        }
+
+        const filtered = initialProducts.filter(
+          item => !(item.productName.toLowerCase() === pName.toLowerCase() && item.weightGrams === numWeight && item.quantity === numQty)
+        );
+        initialProducts = [newProd, ...filtered];
+
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.search = "";
+        window.history.replaceState({}, "", cleanUrl.pathname);
+
+        toast({
+          title: "Ürün Aktarıldı ve Hesaplandı",
+          description: `"${pName}" (${numWeight}g) fiyatlandırma paneliyle otomatik hesaplandı.`,
+        });
+      }
+    }
+
+    setProducts(initialProducts);
   }, []);
 
   // Click outside to close suggestions

@@ -1,16 +1,17 @@
 /**
- * Tüm Pazaryerleri Ortak Fiyatlandırma ve Kâr Hesaplama Motoru
- * (Trendyol, Hepsiburada, n11, Pazarama, Trendruum, İdefix)
+ * Ortak Fiyatlandırma ve Çoklu Pazaryeri Hesaplama Modülü
+ *
+ * 6 Pazaryeri (Trendyol, Hepsiburada, n11, Pazarama, Trendruum, İdefix)
+ * için birebir kendi sayfalarındaki formül ve Türkiye vergi/kargo mevzuatıyla
+ * %100 özdeş hesaplama yapar.
  */
 
-import { calcShippingCost as calcTrendyolShipping } from "@/lib/trendyol-cargo";
-import { calcShippingCost as calcHepsiburadaShipping } from "@/lib/hepsiburada-cargo";
-import { calcN11ShippingCost } from "@/lib/n11-cargo";
-import { calcPazaramaShippingCost } from "@/lib/pazarama-cargo";
-import { calcTrendruumShippingCost } from "@/lib/trendruum-cargo";
-import { calcIdefixShippingCost } from "@/lib/idefix-cargo";
-
-export const KDV_RATE = 0.20;
+import { calcShippingCost as calcTrendyolShipping } from "./trendyol-cargo";
+import { calcShippingCost as calcHepsiburadaShipping } from "./hepsiburada-cargo";
+import { calcN11ShippingCost } from "./n11-cargo";
+import { calcPazaramaShippingCost } from "./pazarama-cargo";
+import { calcTrendruumShippingCost } from "./trendruum-cargo";
+import { calcIdefixShippingCost } from "./idefix-cargo";
 
 export type MarketplaceId =
   | "trendyol"
@@ -130,6 +131,8 @@ export interface BaseSettings {
   cargoCompany?: string;
   advertisingRate: number;
   returnRate: number;
+  monthlyFixedExpense: number;
+  monthlyOrderTarget: number;
   fixedCostPerOrder: number;
   organicSalesMode: boolean;
   candleholderCostPerUnit: number;
@@ -151,10 +154,12 @@ export const DEFAULT_BASE_SETTINGS: BaseSettings = {
   useExpressPlatformFee: false,
   fastShipping: true,
   cargoCompany: "auto",
-  advertisingRate: 0,
+  advertisingRate: 8,
   returnRate: 12,
+  monthlyFixedExpense: 2000,
+  monthlyOrderTarget: 60,
   fixedCostPerOrder: 33.33,
-  organicSalesMode: true,
+  organicSalesMode: false,
   candleholderCostPerUnit: 0,
   keychainCostPerUnit: 2,
   soapdishCostPerUnit: 0,
@@ -200,6 +205,17 @@ export interface PlatformCalculationResult {
   customBreakdown: PriceBreakdown | null;
 }
 
+const VAT_RATE = 0.20;
+
+function gramsToDesi(grams: number): number {
+  return Math.max(1, Math.ceil(grams / 1000));
+}
+
+function getActivePlatformFee(s: BaseSettings): number {
+  const base = s.useExpressPlatformFee ? s.platformFeeExpress : s.platformFeeBase;
+  return (base || 0) * 1.20; // KDV hariç girildiği için * 1.20 ile KDV dahil tutar
+}
+
 /** Pazaryerine göre kargo maliyeti hesaplama fonksiyonu */
 export function calcPlatformShipping(
   id: MarketplaceId,
@@ -226,6 +242,39 @@ export function calcPlatformShipping(
   }
 }
 
+/**
+ * Belirli bir kargo maliyeti için kesin matematiksel fiyatı hesaplar.
+ * Formül: P = (BaseCost - FixedVatInputs) / [ (5/6)*(1 - totalCutRate) - m ]
+ */
+function calcPriceForShippingComp(
+  shipping: number,
+  productionCost: number,
+  weightGramsTotal: number,
+  s: BaseSettings,
+  targetMargin: number
+): number {
+  const platformFee = getActivePlatformFee(s); // KDV dahil
+  const packagingCost = s.packagingCost;
+  const fixedCost = s.fixedCostPerOrder;
+  const returnCost = (productionCost + shipping + packagingCost) * (s.returnRate / 100);
+  const baseCost = productionCost + shipping + packagingCost + platformFee + fixedCost + returnCost;
+
+  const isOrganic = s.organicSalesMode || (s.advertisingRate === 0);
+  const adRate = isOrganic ? 0 : (s.advertisingRate || 0) / 100;
+  const totalCutRate = (s.commissionRate + s.paymentTermFee) / 100 + adRate;
+
+  const wastedGrams = weightGramsTotal * (1 + (s.wastePercentage || 0) / 100);
+  const filamentCost = (wastedGrams / 1000) * (s.filamentPricePerKg || 500);
+  const electricityCost = wastedGrams * (s.electricityCostPerGram || 0.05);
+
+  const fixedVatInputs = (shipping + platformFee + filamentCost + electricityCost + packagingCost) * (VAT_RATE / (1 + VAT_RATE));
+
+  const denominator = (5 / 6) * (1 - totalCutRate) - targetMargin;
+  if (denominator <= 0) return Infinity;
+
+  return (baseCost - fixedVatInputs) / denominator;
+}
+
 /** Pazaryeri için fiyat dökümü hesaplama */
 export function calculateBreakdown(
   id: MarketplaceId,
@@ -235,42 +284,27 @@ export function calculateBreakdown(
   productionCost: number,
   settings: BaseSettings
 ): PriceBreakdown {
-  const purchasePriceIncVat = productionCost;
-  const purchasePriceExVat = purchasePriceIncVat / (1 + KDV_RATE);
-  const purchaseVat = purchasePriceIncVat - purchasePriceExVat;
+  const totalWeight = weightGrams * (quantity || 1);
+  const shippingIncVat = calcPlatformShipping(id, totalWeight, P, settings.fastShipping, settings.cargoCompany);
+  const shippingExVat = shippingIncVat / (1 + VAT_RATE);
 
+  const platformFee = getActivePlatformFee(settings);
   const packagingCost = settings.packagingCost;
-  const packagingCostExVat = packagingCost / (1 + KDV_RATE);
-  const packagingVat = packagingCost - packagingCostExVat;
+  const fixedCost = settings.fixedCostPerOrder;
+  const returnCost = (productionCost + shippingIncVat + packagingCost) * (settings.returnRate / 100);
 
-  const platformFeeIncVat = settings.useExpressPlatformFee ? settings.platformFeeExpress : settings.platformFeeBase;
-  const platformFeeExVat = platformFeeIncVat / (1 + KDV_RATE);
-  const platformVat = platformFeeIncVat - platformFeeExVat;
+  const commission = P * (settings.commissionRate / 100);
+  const paymentTerm = P * (settings.paymentTermFee / 100);
 
   const isOrganic = settings.organicSalesMode || (settings.advertisingRate === 0);
   const adRate = isOrganic ? 0 : (settings.advertisingRate || 0) / 100;
-  const shippingIncVat = calcPlatformShipping(id, weightGrams, P, settings.fastShipping, settings.cargoCompany);
-  const shippingExVat = shippingIncVat / (1 + KDV_RATE);
-  const shippingVat = shippingIncVat - shippingExVat;
-
-  const returnCost = (purchasePriceExVat + shippingIncVat + packagingCost) * (settings.returnRate / 100);
-
-  const commission = P * (settings.commissionRate / 100);
-  const commissionVat = (commission * KDV_RATE) / (1 + KDV_RATE);
-
-  const paymentTerm = P * (settings.paymentTermFee / 100);
-  const paymentTermVat = (paymentTerm * KDV_RATE) / (1 + KDV_RATE);
-
   const advertising = P * adRate;
-  const advertisingVat = (advertising * KDV_RATE) / (1 + KDV_RATE);
-
-  const fixedCost = settings.fixedCostPerOrder;
 
   const totalExpenses =
-    purchasePriceIncVat +
+    productionCost +
     packagingCost +
     shippingIncVat +
-    platformFeeIncVat +
+    platformFee +
     commission +
     paymentTerm +
     advertising +
@@ -279,15 +313,37 @@ export function calculateBreakdown(
 
   const netProfit = P - totalExpenses;
 
-  // KDV mükellefi hesabı
-  const vatCollected = (P * KDV_RATE) / (1 + KDV_RATE);
+  // KDV Mükellefi Hesabı (Devlete Net KDV ve KDV Sonrası Net Kâr)
+  const vatCollected = (P * VAT_RATE) / (1 + VAT_RATE);
+  const vatPaidShipping = (shippingIncVat * VAT_RATE) / (1 + VAT_RATE);
+  const vatPaidPlatform = (platformFee * VAT_RATE) / (1 + VAT_RATE);
+  const commissionForVat = (commission * VAT_RATE) / (1 + VAT_RATE);
+  const paymentTermForVat = (paymentTerm * VAT_RATE) / (1 + VAT_RATE);
+  const advertisingForVat = (advertising * VAT_RATE) / (1 + VAT_RATE);
+
+  const wastedGrams = totalWeight * (1 + (settings.wastePercentage || 0) / 100);
+  const filamentCostForVat = (wastedGrams / 1000) * (settings.filamentPricePerKg || 500);
+  const electricityCostForVat = wastedGrams * (settings.electricityCostPerGram || 0.05);
+
+  const vatPaidFilament = (filamentCostForVat * VAT_RATE) / (1 + VAT_RATE);
+  const vatPaidElectricity = (electricityCostForVat * VAT_RATE) / (1 + VAT_RATE);
+  const vatPaidPackaging = (packagingCost * VAT_RATE) / (1 + VAT_RATE);
+
   const vatPaidInputs =
-    purchaseVat + packagingVat + shippingVat + platformVat + commissionVat + paymentTermVat + advertisingVat;
+    vatPaidShipping +
+    vatPaidPlatform +
+    commissionForVat +
+    paymentTermForVat +
+    advertisingForVat +
+    vatPaidFilament +
+    vatPaidElectricity +
+    vatPaidPackaging;
+
   const vatPayable = Math.max(0, vatCollected - vatPaidInputs);
   const netProfitAfterVat = netProfit - vatPayable;
   const netMarginAfterVat = P > 0 ? (netProfitAfterVat / P) * 100 : 0;
 
-  // Barem kontrolü
+  // Barem kontrolü & Etiketi
   let isBarem = false;
   let baremLabel = "Standart Tarife";
 
@@ -317,7 +373,7 @@ export function calculateBreakdown(
     shippingExVat,
     commission,
     paymentTerm,
-    platformFee: platformFeeIncVat,
+    platformFee,
     advertising,
     returnCost,
     fixedCost,
@@ -340,99 +396,135 @@ export function calculateRecommendedPrice(
   productionCost: number,
   settings: BaseSettings
 ): number {
-  const purchasePriceExVat = productionCost / (1 + KDV_RATE);
-  const packagingCostExVat = settings.packagingCost / (1 + KDV_RATE);
-  const platformFeeIncVat = settings.useExpressPlatformFee ? settings.platformFeeExpress : settings.platformFeeBase;
-  const platformFeeExVat = platformFeeIncVat / (1 + KDV_RATE);
-  const isOrganic = settings.organicSalesMode || (settings.advertisingRate === 0);
-  const adRate = isOrganic ? 0 : (settings.advertisingRate || 0) / 100;
-  const totalCutRate = (settings.commissionRate + settings.paymentTermFee) / 100 + adRate;
-  const m = settings.profitMargin / 100;
+  const totalWeight = weightGrams * (quantity || 1);
+  const desi = gramsToDesi(totalWeight);
+  const m = (settings.profitMargin || 10) / 100;
 
-  const calcExactPriceForShipping = (shippingIncVat: number) => {
-    const shippingExVat = shippingIncVat / (1 + KDV_RATE);
-    const returnCost = (purchasePriceExVat + shippingIncVat + settings.packagingCost) * (settings.returnRate / 100);
-    const totalBaseExpensesExVat =
-      purchasePriceExVat + packagingCostExVat + shippingExVat + platformFeeExVat + settings.fixedCostPerOrder + returnCost;
-    const denom = (5 / 6) * (1 - totalCutRate) - m;
-    if (denom <= 0) return Infinity;
-    return totalBaseExpensesExVat / denom;
-  };
-
-  let recPrice = 200;
+  let exactTargetPrice = Infinity;
+  let targetPrice = 200;
+  let recommendedPrice = 200;
 
   if (id === "trendyol") {
-    const sh199 = calcPlatformShipping(id, weightGrams, 199, settings.fastShipping, settings.cargoCompany);
-    const p1 = calcExactPriceForShipping(sh199);
-    const sh250 = calcPlatformShipping(id, weightGrams, 250, settings.fastShipping, settings.cargoCompany);
-    const p2 = calcExactPriceForShipping(sh250);
-    const sh350 = calcPlatformShipping(id, weightGrams, 350, settings.fastShipping, settings.cargoCompany);
-    const p3 = calcExactPriceForShipping(sh350);
+    let priceUnder200 = Infinity;
+    let price200to350 = Infinity;
 
-    if (p1 <= 199) recPrice = Math.ceil(p1);
-    else if (p2 >= 200 && p2 < 350) recPrice = Math.ceil(p2);
-    else recPrice = Math.ceil(p3);
+    if (desi < 10) {
+      const sh199 = calcPlatformShipping(id, totalWeight, 199, settings.fastShipping, settings.cargoCompany);
+      const p1 = calcPriceForShippingComp(sh199, productionCost, totalWeight, settings, m);
+      if (p1 <= 199) priceUnder200 = p1;
 
-    if (recPrice > 199 && recPrice <= 230) {
+      const sh250 = calcPlatformShipping(id, totalWeight, 250, settings.fastShipping, settings.cargoCompany);
+      const p2 = calcPriceForShippingComp(sh250, productionCost, totalWeight, settings, m);
+      if (p2 >= 200 && p2 < 350) price200to350 = p2;
+    }
+
+    const sh350 = calcPlatformShipping(id, totalWeight, 350, settings.fastShipping, settings.cargoCompany);
+    const p3 = calcPriceForShippingComp(sh350, productionCost, totalWeight, settings, m);
+
+    if (isFinite(priceUnder200)) exactTargetPrice = priceUnder200;
+    else if (isFinite(price200to350)) exactTargetPrice = price200to350;
+    else exactTargetPrice = p3;
+
+    targetPrice = Math.ceil(exactTargetPrice);
+    recommendedPrice = targetPrice;
+
+    if (desi < 10 && targetPrice > 199) {
       const r199 = calculateBreakdown(id, 199, weightGrams, quantity, productionCost, settings);
-      const rRec = calculateBreakdown(id, recPrice, weightGrams, quantity, productionCost, settings);
-      if (r199.netProfitAfterVat > rRec.netProfitAfterVat) recPrice = 199;
+      const rRec = calculateBreakdown(id, targetPrice, weightGrams, quantity, productionCost, settings);
+      if (r199.netProfitAfterVat > rRec.netProfitAfterVat) {
+        recommendedPrice = 199;
+      }
     }
   } else if (id === "hepsiburada") {
-    const sh199 = calcPlatformShipping(id, weightGrams, 199, settings.fastShipping);
-    const p1 = calcExactPriceForShipping(sh199);
-    const sh300 = calcPlatformShipping(id, weightGrams, 300, settings.fastShipping);
-    const p2 = calcExactPriceForShipping(sh300);
-    const sh450 = calcPlatformShipping(id, weightGrams, 450, settings.fastShipping);
-    const p3 = calcExactPriceForShipping(sh450);
+    let priceUnder200 = Infinity;
+    let price200to350 = Infinity;
 
-    if (p1 <= 200) recPrice = Math.ceil(p1);
-    else if (p2 > 200 && p2 < 400) recPrice = Math.ceil(p2);
-    else recPrice = Math.ceil(p3);
+    if (desi < 10) {
+      const sh199 = calcPlatformShipping(id, totalWeight, 199, settings.fastShipping, settings.cargoCompany);
+      const p1 = calcPriceForShippingComp(sh199, productionCost, totalWeight, settings, m);
+      if (p1 <= 199) priceUnder200 = p1;
 
-    if (recPrice > 199 && recPrice <= 230) {
-      const r199 = calculateBreakdown(id, 199.90, weightGrams, quantity, productionCost, settings);
-      const rRec = calculateBreakdown(id, recPrice, weightGrams, quantity, productionCost, settings);
-      if (r199.netProfitAfterVat > rRec.netProfitAfterVat) recPrice = 199.90;
-    } else if (recPrice >= 400 && recPrice <= 430) {
-      const r399 = calculateBreakdown(id, 399.90, weightGrams, quantity, productionCost, settings);
-      const rRec = calculateBreakdown(id, recPrice, weightGrams, quantity, productionCost, settings);
-      if (r399.netProfitAfterVat > rRec.netProfitAfterVat) recPrice = 399.90;
+      const sh250 = calcPlatformShipping(id, totalWeight, 250, settings.fastShipping, settings.cargoCompany);
+      const p2 = calcPriceForShippingComp(sh250, productionCost, totalWeight, settings, m);
+      if (p2 >= 200 && p2 < 350) price200to350 = p2;
+    }
+
+    const sh350 = calcPlatformShipping(id, totalWeight, 350, settings.fastShipping, settings.cargoCompany);
+    const p3 = calcPriceForShippingComp(sh350, productionCost, totalWeight, settings, m);
+
+    if (isFinite(priceUnder200)) exactTargetPrice = priceUnder200;
+    else if (isFinite(price200to350)) exactTargetPrice = price200to350;
+    else exactTargetPrice = p3;
+
+    targetPrice = Math.ceil(exactTargetPrice);
+    recommendedPrice = targetPrice;
+
+    if (desi < 10 && targetPrice > 199) {
+      const r199 = calculateBreakdown(id, 199, weightGrams, quantity, productionCost, settings);
+      const rRec = calculateBreakdown(id, targetPrice, weightGrams, quantity, productionCost, settings);
+      if (r199.netProfitAfterVat > rRec.netProfitAfterVat) {
+        recommendedPrice = 199;
+      }
     }
   } else if (id === "n11" || id === "pazarama" || id === "idefix") {
-    const sh149 = calcPlatformShipping(id, weightGrams, 149, settings.fastShipping, settings.cargoCompany);
-    const p1 = calcExactPriceForShipping(sh149);
-    const sh200 = calcPlatformShipping(id, weightGrams, 200, settings.fastShipping, settings.cargoCompany);
-    const p2 = calcExactPriceForShipping(sh200);
-    const sh300 = calcPlatformShipping(id, weightGrams, 300, settings.fastShipping, settings.cargoCompany);
-    const p3 = calcExactPriceForShipping(sh300);
+    let priceUnder150 = Infinity;
+    let price150to300 = Infinity;
 
-    if (p1 <= 149) recPrice = Math.ceil(p1);
-    else if (p2 >= 150 && p2 < 300) recPrice = Math.ceil(p2);
-    else recPrice = Math.ceil(p3);
+    if (desi < 10) {
+      const sh149 = calcPlatformShipping(id, totalWeight, 149, settings.fastShipping, settings.cargoCompany);
+      const p1 = calcPriceForShippingComp(sh149, productionCost, totalWeight, settings, m);
+      if (p1 <= 149) priceUnder150 = p1;
 
-    if (recPrice > 149 && recPrice <= 180) {
+      const sh200 = calcPlatformShipping(id, totalWeight, 200, settings.fastShipping, settings.cargoCompany);
+      const p2 = calcPriceForShippingComp(sh200, productionCost, totalWeight, settings, m);
+      if (p2 >= 150 && p2 < 300) price150to300 = p2;
+    }
+
+    const sh300 = calcPlatformShipping(id, totalWeight, 300, settings.fastShipping, settings.cargoCompany);
+    const p3 = calcPriceForShippingComp(sh300, productionCost, totalWeight, settings, m);
+
+    if (isFinite(priceUnder150)) exactTargetPrice = priceUnder150;
+    else if (isFinite(price150to300)) exactTargetPrice = price150to300;
+    else exactTargetPrice = p3;
+
+    targetPrice = Math.ceil(exactTargetPrice);
+    recommendedPrice = targetPrice;
+
+    if (desi < 10 && targetPrice > 149) {
       const r149 = calculateBreakdown(id, 149, weightGrams, quantity, productionCost, settings);
-      const rRec = calculateBreakdown(id, recPrice, weightGrams, quantity, productionCost, settings);
-      if (r149.netProfitAfterVat > rRec.netProfitAfterVat) recPrice = 149;
+      const rRec = calculateBreakdown(id, targetPrice, weightGrams, quantity, productionCost, settings);
+      if (r149.netProfitAfterVat > rRec.netProfitAfterVat) {
+        recommendedPrice = 149;
+      }
     }
   } else if (id === "trendruum") {
-    const sh250 = calcPlatformShipping(id, weightGrams, 250, settings.fastShipping, settings.cargoCompany);
-    const p1 = calcExactPriceForShipping(sh250);
-    const sh350 = calcPlatformShipping(id, weightGrams, 350, settings.fastShipping, settings.cargoCompany);
-    const p2 = calcExactPriceForShipping(sh350);
+    let priceUnder350 = Infinity;
 
-    if (p1 < 350) recPrice = Math.ceil(p1);
-    else recPrice = Math.ceil(p2);
+    if (desi < 10) {
+      const sh250 = calcPlatformShipping(id, totalWeight, 250, settings.fastShipping, settings.cargoCompany);
+      const p1 = calcPriceForShippingComp(sh250, productionCost, totalWeight, settings, m);
+      if (p1 < 350) priceUnder350 = p1;
+    }
 
-    if (recPrice > 349 && recPrice <= 380) {
+    const sh350 = calcPlatformShipping(id, totalWeight, 350, settings.fastShipping, settings.cargoCompany);
+    const p2 = calcPriceForShippingComp(sh350, productionCost, totalWeight, settings, m);
+
+    if (isFinite(priceUnder350)) exactTargetPrice = priceUnder350;
+    else exactTargetPrice = p2;
+
+    targetPrice = Math.ceil(exactTargetPrice);
+    recommendedPrice = targetPrice;
+
+    if (desi < 10 && targetPrice > 349) {
       const r349 = calculateBreakdown(id, 349, weightGrams, quantity, productionCost, settings);
-      const rRec = calculateBreakdown(id, recPrice, weightGrams, quantity, productionCost, settings);
-      if (r349.netProfitAfterVat > rRec.netProfitAfterVat) recPrice = 349;
+      const rRec = calculateBreakdown(id, targetPrice, weightGrams, quantity, productionCost, settings);
+      if (r349.netProfitAfterVat > rRec.netProfitAfterVat) {
+        recommendedPrice = 349;
+      }
     }
   }
 
-  return recPrice;
+  return isFinite(recommendedPrice) ? recommendedPrice : 200;
 }
 
 /** Tek bir pazaryeri için tam hesaplama paketi */
@@ -450,23 +542,26 @@ export function calculatePlatformAll(
     ...(customSettings || {}),
   };
 
-  // Üretim Maliyeti
-  const costPerGram =
-    (settings.filamentPricePerKg / 1000) * (1 + settings.wastePercentage / 100) +
-    settings.electricityCostPerGram +
-    settings.depreciationCostPerGram;
-  const baseProduction = product.weightGrams * costPerGram * (product.quantity || 1);
-  const extras =
-    (product.isCandleholder ? settings.candleholderCostPerUnit : 0) +
-    (product.isKeychain ? settings.keychainCostPerUnit : 0) +
-    (product.isSoapdish ? settings.soapdishCostPerUnit : 0);
-  const productionCost = baseProduction + extras;
+  // Üretim Maliyeti (Gramaj × (Filament + Elektrik + Yıpranma) + Ekstra Malzemeler)
+  const qty = product.quantity || 1;
+  const wastedGrams = product.weightGrams * (1 + (settings.wastePercentage || 0) / 100);
+  const filamentCost = (wastedGrams / 1000) * (settings.filamentPricePerKg || 500);
+  const electricityCost = wastedGrams * (settings.electricityCostPerGram || 0.05);
+  const depreciationCost = wastedGrams * (settings.depreciationCostPerGram || 0.05);
+
+  const unitProduction = filamentCost + electricityCost + depreciationCost;
+  const extraPerUnit =
+    (product.isCandleholder ? settings.candleholderCostPerUnit || 0 : 0) +
+    (product.isKeychain ? settings.keychainCostPerUnit || 0 : 0) +
+    (product.isSoapdish ? settings.soapdishCostPerUnit || 0 : 0);
+
+  const productionCost = unitProduction * qty + extraPerUnit * qty;
 
   // Önerilen Satış Fiyatı
   const recommendedPrice = calculateRecommendedPrice(
     meta.id,
     product.weightGrams,
-    product.quantity || 1,
+    qty,
     productionCost,
     settings
   );
@@ -475,7 +570,7 @@ export function calculatePlatformAll(
     meta.id,
     recommendedPrice,
     product.weightGrams,
-    product.quantity || 1,
+    qty,
     productionCost,
     settings
   );
@@ -486,7 +581,7 @@ export function calculatePlatformAll(
           meta.id,
           customSimulatedPrice,
           product.weightGrams,
-          product.quantity || 1,
+          qty,
           productionCost,
           settings
         )

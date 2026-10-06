@@ -290,43 +290,52 @@ function calcNetProfit(input: NetProfitInput): number {
 
 export function checkPriceOptimization(input: NetProfitInput): OptimizationSuggestion {
   const { satisFiyati } = input;
-  const OPTIMIZED_PRICE = 199.90;
 
-  // Kural 6: sadece 200–215 TL arasında kontrol et
-  const inRange = satisFiyati >= 200 && satisFiyati <= 215;
+  // Barem 1 optimizasyonu: 200–225 TL arası -> 199.90 TL
+  if (satisFiyati >= 200 && satisFiyati <= 225) {
+    const OPTIMIZED_PRICE = 199.90;
+    const currentProfit = calcNetProfit(input);
+    const optimizedProfit = calcNetProfit({ ...input, satisFiyati: OPTIMIZED_PRICE });
+    const profitIncrease = optimizedProfit - currentProfit;
 
-  if (!inRange) {
-    return {
-      shouldOptimize: false,
-      suggestedPrice: OPTIMIZED_PRICE,
-      currentNetProfit: calcNetProfit(input),
-      optimizedNetProfit: calcNetProfit({ ...input, satisFiyati: OPTIMIZED_PRICE }),
-      profitIncrease: 0,
-      message: "",
-    };
+    if (profitIncrease > 0) {
+      return {
+        shouldOptimize: true,
+        suggestedPrice: OPTIMIZED_PRICE,
+        currentNetProfit: currentProfit,
+        optimizedNetProfit: optimizedProfit,
+        profitIncrease,
+        message: `⚡ Uyarı: Fiyatı ₺199.90 yaparsanız (Barem 1 Kargo avantajı ile) net kârınız ₺${profitIncrease.toFixed(2)} artacaktır (₺${currentProfit.toFixed(2)} → ₺${optimizedProfit.toFixed(2)})`,
+      };
+    }
+  }
+
+  // Barem 2 optimizasyonu: 350–375 TL arası -> 349.90 TL
+  if (satisFiyati >= 350 && satisFiyati <= 375) {
+    const OPTIMIZED_PRICE = 349.90;
+    const currentProfit = calcNetProfit(input);
+    const optimizedProfit = calcNetProfit({ ...input, satisFiyati: OPTIMIZED_PRICE });
+    const profitIncrease = optimizedProfit - currentProfit;
+
+    if (profitIncrease > 0) {
+      return {
+        shouldOptimize: true,
+        suggestedPrice: OPTIMIZED_PRICE,
+        currentNetProfit: currentProfit,
+        optimizedNetProfit: optimizedProfit,
+        profitIncrease,
+        message: `⚡ Uyarı: Fiyatı ₺349.90 yaparsanız (Barem 2 Kargo avantajı ile) net kârınız ₺${profitIncrease.toFixed(2)} artacaktır (₺${currentProfit.toFixed(2)} → ₺${optimizedProfit.toFixed(2)})`,
+      };
+    }
   }
 
   const currentProfit = calcNetProfit(input);
-  const optimizedProfit = calcNetProfit({ ...input, satisFiyati: OPTIMIZED_PRICE });
-  const profitIncrease = optimizedProfit - currentProfit;
-
-  if (profitIncrease > 0) {
-    return {
-      shouldOptimize: true,
-      suggestedPrice: OPTIMIZED_PRICE,
-      currentNetProfit: currentProfit,
-      optimizedNetProfit: optimizedProfit,
-      profitIncrease,
-      message: `⚡ Uyarı: Fiyatı ₺199.90 yaparsanız net kârınız ₺${profitIncrease.toFixed(2)} artacaktır (₺${currentProfit.toFixed(2)} → ₺${optimizedProfit.toFixed(2)})`,
-    };
-  }
-
   return {
     shouldOptimize: false,
-    suggestedPrice: OPTIMIZED_PRICE,
+    suggestedPrice: satisFiyati < 200 ? 199.90 : 349.90,
     currentNetProfit: currentProfit,
-    optimizedNetProfit: optimizedProfit,
-    profitIncrease,
+    optimizedNetProfit: currentProfit,
+    profitIncrease: 0,
     message: "",
   };
 }

@@ -542,25 +542,28 @@ export function OrderDetailDialogV2({ order: initialOrder, onClose, onStatusChan
             </div>
 
             {/* Summary inline */}
-            <div className="flex items-center gap-1.5 py-3 text-sm flex-wrap">
-              <span className="text-muted-foreground">Sipariş</span>
-              <span className="font-semibold text-foreground">{formatCurrency(order.total_amount)}</span>
-              {overProductionValue > 0 && (
-                <>
-                  <span className="text-muted-foreground/40 mx-0.5">+</span>
-                  <span className="text-muted-foreground">Fazla Üretim</span>
-                  <span className="font-semibold text-amber-600">{formatCurrency(overProductionValue)}</span>
-                </>
-              )}
-              <span className="text-muted-foreground/40 mx-0.5">·</span>
-              <span className="text-muted-foreground">Toplam</span>
-              <span className="font-semibold text-blue-600">{formatCurrency(actualTotalAmount)}</span>
-              <span className="text-muted-foreground/40 mx-0.5">·</span>
-              <span className="text-muted-foreground">Ödenen</span>
-              <span className="font-semibold text-emerald-600">{formatCurrency(order.paid_amount)}</span>
-              <span className="text-muted-foreground/40 mx-0.5">·</span>
-              <span className="text-muted-foreground">Kalan</span>
-              <span className={`font-semibold ${actualDebt > 0 ? "text-red-500" : "text-emerald-600"}`}>{formatCurrency(Math.abs(actualDebt))}</span>
+            {/* Financial Stats Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 py-3">
+              <div className="bg-muted/40 rounded-xl p-2.5 border border-border/50">
+                <p className="text-[10px] text-muted-foreground uppercase font-semibold">Sipariş Tutarı</p>
+                <p className="text-sm font-bold text-foreground">{formatCurrency(order.total_amount)}</p>
+              </div>
+              <div className="bg-muted/40 rounded-xl p-2.5 border border-border/50">
+                <p className="text-[10px] text-muted-foreground uppercase font-semibold">
+                  {overProductionValue > 0 ? "Toplam (+Fazla)" : "Net Toplam"}
+                </p>
+                <p className="text-sm font-bold text-blue-600 dark:text-blue-400">{formatCurrency(actualTotalAmount)}</p>
+              </div>
+              <div className="bg-muted/40 rounded-xl p-2.5 border border-border/50">
+                <p className="text-[10px] text-muted-foreground uppercase font-semibold">Ödenen</p>
+                <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(order.paid_amount)}</p>
+              </div>
+              <div className={`rounded-xl p-2.5 border ${actualDebt > 0 ? 'bg-red-500/5 border-red-500/20' : 'bg-emerald-500/5 border-emerald-500/20'}`}>
+                <p className="text-[10px] text-muted-foreground uppercase font-semibold">Kalan Borç</p>
+                <p className={`text-sm font-bold ${actualDebt > 0 ? "text-red-500" : "text-emerald-600"}`}>
+                  {formatCurrency(Math.abs(actualDebt))}
+                </p>
+              </div>
             </div>
 
             {/* Status pills */}

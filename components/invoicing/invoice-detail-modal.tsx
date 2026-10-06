@@ -142,30 +142,62 @@ export function InvoiceDetailModal({ orderId, onClose }: InvoiceDetailModalProps
   const totalWithoutVAT = totalWithVAT / (1 + VAT_RATE);
   const vatAmount = totalWithVAT - totalWithoutVAT;
 
+  const copyAllDetails = () => {
+    const text = `Sipariş No: ${order.order_number}
+Müşteri: ${customerName}
+Fatura Tipi: ${isCorporate ? "Kurumsal" : "Bireysel"}
+${isCorporate ? `Firma Adı: ${companyName}\nVKN: ${taxNumber}\nVergi Dairesi: ${taxOffice}\n` : ""}
+Fatura Adresi: ${invoiceFullAddress}
+Teslimat Adresi: ${shipmentFullAddress}
+Toplam Tutar (KDV Dahil): ${formatCurrency(totalWithVAT)}
+KDV Hariç: ${formatCurrency(totalWithoutVAT)}
+KDV Tutarı (%20): ${formatCurrency(vatAmount)}`;
+    copyToClipboard(text, "all-details");
+    toast({ title: "Kopyalandı", description: "Tüm fatura bilgileri panoya kopyalandı." });
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-card rounded-2xl border border-border shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-card rounded-3xl border border-border shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-border">
-          <div className="flex-1">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-border bg-muted/20">
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-bold text-foreground">Fatura Bilgileri</h2>
-              {isCorporate && (
-                <div className="px-3 py-1.5 rounded-lg bg-blue-500/20 border border-blue-500/30">
-                  <span className="text-sm font-bold text-blue-700 dark:text-blue-300">🏢 Kurumsal Fatura</span>
-                </div>
+              <h2 className="text-xl font-bold text-foreground">Fatura Bilgileri</h2>
+              {isCorporate ? (
+                <span className="px-2.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-xs font-bold text-blue-600 dark:text-blue-400">
+                  🏢 Kurumsal
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 rounded-full bg-muted border border-border text-xs font-semibold text-muted-foreground">
+                  👤 Bireysel
+                </span>
               )}
             </div>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-xs text-muted-foreground mt-0.5 font-mono">
               Sipariş #{order.order_number}
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="w-10 h-10 rounded-xl hover:bg-muted flex items-center justify-center transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          
+          <div className="flex items-center gap-2">
+            <button
+              onClick={copyAllDetails}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-all active:scale-95"
+            >
+              {copied === "all-details" ? (
+                <CheckCircle2 className="w-3.5 h-3.5" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
+              <span>Tümünü Kopyala</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="w-9 h-9 rounded-xl hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
